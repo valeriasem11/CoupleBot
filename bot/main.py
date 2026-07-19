@@ -5,6 +5,7 @@
 """
 import asyncio
 import logging
+import subprocess
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -12,6 +13,7 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
 from bot.config import config
+from bot.database.seed import main as seed_database
 from bot.handlers import casino, child_actions, children, economy, relationships, shop, start, toys
 from bot.services.scheduler import setup_scheduler
 from bot.middlewares.db_session import DbSessionMiddleware
@@ -48,7 +50,35 @@ BOT_COMMANDS = [
 ]
 
 
+def run_migrations() -> None:
+    """
+    Применяет миграции базы данных (alembic upgrade head) перед запуском бота.
+    Если миграций применять нечего — команда просто ничего не делает (безопасно
+    выполнять при каждом запуске, в том числе локально).
+    """
+    logger.info("Применяем миграции базы данных...")
+    result = subprocess.run(
+        ["alembic", "upgrade", "head"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        logger.error(
+            "Не удалось применить миграции базы данных:\n%s\n%s",
+            result.stdout,
+            result.stderr,
+        )
+        raise RuntimeError("alembic upgrade head завершился с ошибкой — смотри лог выше.")
+    logger.info("Миграции применены успешно.")
+
+
 async def main():
+    run_migrations()
+
+    logger.info("Заполняем/обновляем справочники (работы, дома, действия и т.д.)...")
+    await seed_database()
+    logger.info("Справочники готовы.")
+
     bot = Bot(
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
