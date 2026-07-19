@@ -1,65 +1,26 @@
 """
-Хендлер рейтинга пар: /top, переключение категорий (близость/богатство/дети).
+Клавиатура рейтинга пар: переключение между категориями.
 """
-from aiogram import F, Router
-from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
-from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from bot.keyboards.leaderboard import TOP_CATEGORIES, TOP_CATEGORY_PREFIX, build_top_keyboard
-from bot.services.leaderboard_service import get_top_by_affection, get_top_by_children, get_top_by_wealth
+TOP_CATEGORY_PREFIX = "top_cat:"
 
-router = Router(name="leaderboard")
-
-MEDALS = ["🥇", "🥈", "🥉"]
-
-GETTERS = {
-    "affection": get_top_by_affection,
-    "wealth": get_top_by_wealth,
-    "children": get_top_by_children,
-}
-
-UNITS = {
-    "affection": "❤️",
-    "wealth": "🪙",
-    "children": "",
+TOP_CATEGORIES = {
+    "affection": "❤️ Близость",
+    "wealth": "💰 Богатство",
+    "children": "👶 Дети",
 }
 
 
-def _mention(user) -> str:
-    if user.username:
-        return f"@{user.username}"
-    return user.first_name
-
-
-async def _render_leaderboard(chat_id: int, code: str, session: AsyncSession) -> str:
-    entries = await GETTERS[code](session, chat_id)
-    label = TOP_CATEGORIES[code]
-    unit = UNITS[code]
-
-    if not entries:
-        return f"{label}\n\nПока здесь пусто — ни одной пары в этой категории."
-
-    lines = [label, ""]
-    for i, entry in enumerate(entries):
-        rel = entry.relationship
-        place = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
-        names = f"{_mention(rel.user1)} и {_mention(rel.user2)}"
-        value_str = f"{entry.value} {unit}".strip()
-        lines.append(f"{place} {names} — {value_str}")
-
-    return "\n".join(lines)
-
-
-@router.message(Command("top"))
-async def cmd_top(message: Message, session: AsyncSession):
-    text = await _render_leaderboard(message.chat.id, "affection", session)
-    await message.answer(text, reply_markup=build_top_keyboard("affection"))
-
-
-@router.callback_query(F.data.startswith(TOP_CATEGORY_PREFIX))
-async def on_top_category(callback: CallbackQuery, session: AsyncSession):
-    code = callback.data.removeprefix(TOP_CATEGORY_PREFIX)
-    text = await _render_leaderboard(callback.message.chat.id, code, session)
-    await callback.message.edit_text(text, reply_markup=build_top_keyboard(code))
-    await callback.answer()
+def build_top_keyboard(active_code: str) -> InlineKeyboardMarkup:
+    buttons = []
+    row = []
+    for code, label in TOP_CATEGORIES.items():
+        text = f"• {label} •" if code == active_code else label
+        row.append(InlineKeyboardButton(text=text, callback_data=f"{TOP_CATEGORY_PREFIX}{code}"))
+        if len(row) == 3:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
