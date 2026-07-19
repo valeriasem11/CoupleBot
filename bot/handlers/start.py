@@ -1,12 +1,19 @@
 """
 Хендлер команды /start — точка входа для нового пользователя.
 """
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import get_or_create_user
+from bot.keyboards.menu import (
+    MENU_BACK,
+    MENU_CATEGORY_PREFIX,
+    build_category_back_keyboard,
+    build_menu_keyboard,
+    format_category_text,
+)
 
 router = Router(name="start")
 
@@ -25,27 +32,28 @@ async def cmd_start(message: Message, session: AsyncSession):
         f"Привет, {user.first_name}! 👋\n\n"
         f"Добро пожаловать в игру отношений.\n"
         f"Твой баланс: {user.balance} 🪙\n\n"
-        f"Доступные команды:\n"
-        f"/job — выбрать работу\n"
-        f"/work — пойти на смену (раз в 6 часов)\n"
-        f"/balance — посмотреть баланс\n\n"
-        f"/propose — предложить отношения (ответом на сообщение)\n"
-        f"/actions — взаимодействовать с партнёром\n"
-        f"/couple — профиль пары\n"
-        f"/marry — сделать предложение руки и сердца\n"
-        f"/breakup — расстаться / развестись\n\n"
-        f"/budget — семейный бюджет (только в браке)\n"
-        f"/deposit — положить деньги в бюджет\n"
-        f"/withdraw — снять деньги из бюджета\n"
-        f"/shop — магазин: дом, машина и игрушки для детей\n\n"
-        f"/loan — взять кредит (до 15 000 🪙)\n"
-        f"/repay — погасить кредит\n\n"
-        f"/casino (ставка) — казино на слот 🎰 (мин. 100 🪙, кулдаун 5 минут)\n\n"
-        f"/have_child — попробовать зачать ребёнка (только в браке)\n"
-        f"/name_child (имя) — дать имя новорождённому\n"
-        f"/children — список детей и их карточки\n"
-        f"/child_actions — взаимодействовать с ребёнком"
+        f"Выбери категорию, чтобы посмотреть команды:",
+        reply_markup=build_menu_keyboard(),
     )
+
+
+@router.callback_query(F.data.startswith(MENU_CATEGORY_PREFIX))
+async def on_menu_category(callback: CallbackQuery):
+    code = callback.data.removeprefix(MENU_CATEGORY_PREFIX)
+    await callback.message.edit_text(
+        format_category_text(code),
+        reply_markup=build_category_back_keyboard(),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == MENU_BACK)
+async def on_menu_back(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "Выбери категорию, чтобы посмотреть команды:",
+        reply_markup=build_menu_keyboard(),
+    )
+    await callback.answer()
 
 
 @router.message(Command("chatid"))
