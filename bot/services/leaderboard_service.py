@@ -54,19 +54,25 @@ async def get_top_by_wealth(session: AsyncSession, chat_id: int) -> list[Leaderb
 
 
 async def get_top_by_children(session: AsyncSession, chat_id: int) -> list[LeaderboardEntry]:
+    # Считаем живых детей отдельным подзапросом — если делать group by в общем
+    # запросе вместе с ORM-джойнами (работа, дом, машина партнёров), PostgreSQL
+    # требует включать в GROUP BY вообще все выбранные колонки, что превращает
+    # запрос в кашу. Подзапрос с группировкой только по детям — надёжнее.
+    children_count_subq = (
+        select(Child.relationship_id, func.count(Child.id).label("cnt"))
+        .where(Child.status == ChildStatus.ALIVE)
+        .group_by(Child.relationship_id)
+        .subquery()
+    )
+
     result = await session.execute(
-        select(
-            Relationship,
-            func.count(Child.id).label("children_count"),
-        )
-        .join(Child, Child.relationship_id == Relationship.id, isouter=True)
+        select(Relationship, func.coalesce(children_count_subq.c.cnt, 0).label("children_count"))
+        .outerjoin(children_count_subq, children_count_subq.c.relationship_id == Relationship.id)
         .where(
             Relationship.chat_id == chat_id,
             Relationship.status == RelationshipStatus.MARRIED,
         )
-        .where((Child.status == ChildStatus.ALIVE) | (Child.status.is_(None)))
-        .group_by(Relationship.id)
-        .order_by(func.count(Child.id).desc())
+        .order_by(func.coalesce(children_count_subq.c.cnt, 0).desc())
         .limit(TOP_LIMIT)
     )
     rows = result.all()
