@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Job, User
+from bot.services.career_service import get_career_level
 
 # Вероятности исходов при вызове /work.
 # Сумма должна быть равна 1.0 — обычная смена добирает всё, что осталось.
@@ -33,12 +34,14 @@ class WorkResult:
     base_salary: int
     bonus_amount: int
     total: int
+    career_title: str
+    leveled_up_to: str | None  # если на этой смене произошло повышение — новое звание
 
 
-def calculate_work_result(base_salary: int) -> WorkResult:
+def calculate_work_result(base_salary: int) -> tuple[WorkOutcome, int, int]:
     """
     Разыгрывает исход смены: обычная / чаевые / премия,
-    и считает итоговую сумму заработка.
+    и считает итоговую сумму заработка (от уже умноженной на карьеру базы).
     """
     roll = random.random()
 
@@ -55,12 +58,7 @@ def calculate_work_result(base_salary: int) -> WorkResult:
     bonus_amount = round(base_salary * percent / 100)
     total = base_salary + bonus_amount
 
-    return WorkResult(
-        outcome=outcome,
-        base_salary=base_salary,
-        bonus_amount=bonus_amount,
-        total=total,
-    )
+    return outcome, bonus_amount, total
 
 
 def get_work_cooldown_remaining(user: User, job: Job) -> timedelta | None:
@@ -100,20 +98,36 @@ def format_timedelta(delta: timedelta) -> str:
 
 async def perform_work(session: AsyncSession, user: User, job: Job) -> WorkResult:
     """
-    Выполняет смену: начисляет деньги пользователю и обновляет
-    время последнего использования работы.
+    Выполняет смену: начисляет деньги пользователю (с учётом карьерного
+    множителя), увеличивает счётчик смен и обновляет время последнего
+    использования работы.
 
     Вызывающий код должен ЗАРАНЕЕ проверить кулдаун через
     get_work_cooldown_remaining — эта функция сама его не проверяет.
     """
-    result = calculate_work_result(job.salary)
+    shifts_before = user.job_shifts_worked
+    level_before = get_career_level(shifts_before)
 
-    user.balance += result.total
+    effective_salary = round(job.salary * level_before.multiplier)
+    outcome, bonus_amount, total = calculate_work_result(effective_salary)
+
+    user.balance += total
     user.job_last_used_at = datetime.now(timezone.utc)
+    user.job_shifts_worked += 1
+
+    level_after = get_career_level(user.job_shifts_worked)
+    leveled_up_to = level_after.title if level_after.title != level_before.title else None
 
     await session.commit()
 
-    return result
+    return WorkResult(
+        outcome=outcome,
+        base_salary=effective_salary,
+        bonus_amount=bonus_amount,
+        total=total,
+        career_title=level_after.title,
+        leveled_up_to=leveled_up_to,
+    )
 
 
 # ---------------------------------------------------------------------------
