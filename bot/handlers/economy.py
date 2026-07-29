@@ -14,6 +14,7 @@ from bot.database.crud import (
 )
 from bot.keyboards.economy import JOB_CALLBACK_PREFIX, build_jobs_keyboard
 from bot.services.achievement_service import award, check_balance_milestones, format_unlock_text
+from bot.services.career_service import get_career_level, is_max_level
 from bot.services.economy_service import (
     WorkOutcome,
     LoanError,
@@ -46,7 +47,17 @@ async def _get_user(message_or_callback, session: AsyncSession):
 async def cmd_balance(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
 
-    job_line = f"Текущая работа: {user.job.name}" if user.job else "Работа не выбрана — набери /job, чтобы выбрать."
+    if user.job:
+        level = get_career_level(user.job_shifts_worked)
+        next_line = (
+            f" (до «{level.next_title}»: {level.shifts_to_next} смен)"
+            if level.shifts_to_next is not None
+            else " (максимальный уровень)"
+        )
+        job_line = f"Текущая работа: {user.job.name}\n🎓 Звание: {level.title}{next_line}"
+    else:
+        job_line = "Работа не выбрана — набери /job, чтобы выбрать."
+
     loan_line = f"\n💳 Долг по кредиту: {user.loan_amount} 🪙" if user.loan_amount > 0 else ""
 
     await message.answer(
@@ -68,7 +79,8 @@ async def cmd_job(message: Message, session: AsyncSession):
         return
 
     await message.answer(
-        "Выбери работу (это чисто по вкусу — на заработок не влияет):",
+        "Выбери работу (это чисто по вкусу — на заработок не влияет).\n"
+        "⚠️ При смене работы карьерный прогресс на прошлой обнулится.",
         reply_markup=build_jobs_keyboard(jobs),
     )
 
@@ -125,6 +137,13 @@ async def cmd_work(message: Message, session: AsyncSession):
         text = f"Ты отработала смену и заработала {result.total} 🪙."
 
     await message.answer(text)
+
+    if result.leveled_up_to is not None:
+        await message.answer(f"🎓 Повышение! Новое звание: {result.leveled_up_to}")
+
+        if is_max_level(user.job_shifts_worked):
+            if await award(session, user, "career_master"):
+                await message.answer(format_unlock_text("career_master"))
 
     for code in await check_balance_milestones(session, user):
         await message.answer(format_unlock_text(code))
