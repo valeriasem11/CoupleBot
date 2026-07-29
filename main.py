@@ -14,7 +14,18 @@ from aiogram.types import BotCommand
 
 from bot.config import config
 from bot.database.seed import main as seed_database
-from bot.handlers import casino, child_actions, children, economy, leaderboard, relationships, shop, start, toys
+from bot.handlers import (
+    achievements,
+    casino,
+    child_actions,
+    children,
+    economy,
+    leaderboard,
+    relationships,
+    shop,
+    start,
+    toys,
+)
 from bot.services.scheduler import setup_scheduler
 from bot.middlewares.db_session import DbSessionMiddleware
 
@@ -48,6 +59,7 @@ BOT_COMMANDS = [
     BotCommand(command="children", description="Список детей и их карточки"),
     BotCommand(command="child_actions", description="Взаимодействовать с ребёнком"),
     BotCommand(command="top", description="Рейтинг пар в этой беседе"),
+    BotCommand(command="achievements", description="Достижения"),
 ]
 
 
@@ -100,6 +112,7 @@ async def main():
     dp.include_router(child_actions.router)
     dp.include_router(toys.router)
     dp.include_router(leaderboard.router)
+    dp.include_router(achievements.router)
 
     # На всякий случай сбрасываем накопленные апдейты перед стартом polling
     await bot.delete_webhook(drop_pending_updates=True)
