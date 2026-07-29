@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs
@@ -279,6 +280,20 @@ class ChildAction(Base):
     mood_reward: Mapped[int] = mapped_column(Integer)
     # код черты характера, которая даёт бонус к этому действию (см. children_service.py); может быть пустым
     bonus_trait: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+
+class UserAchievement(Base):
+    """Разблокированные достижения пользователя. Уникальность — по (user_id, code)."""
+
+    __tablename__ = "user_achievements"
+    __table_args__ = (UniqueConstraint("user_id", "code", name="uq_user_achievement"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    code: Mapped[str] = mapped_column(String(50))
+    unlocked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class Child(Base):
