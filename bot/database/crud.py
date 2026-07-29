@@ -81,6 +81,7 @@ async def get_job_by_id(session: AsyncSession, job_id: int) -> Job | None:
 
 
 async def set_user_job(session: AsyncSession, user: User, job: Job) -> None:
-    """Назначает пользователю выбранную работу."""
+    """Назначает пользователю выбранную работу. Карьерный прогресс обнуляется."""
     user.job_id = job.id
+    user.job_shifts_worked = 0
     await session.commit()

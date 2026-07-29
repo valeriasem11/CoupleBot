@@ -136,6 +136,9 @@ class User(Base):
     job_last_used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # сколько смен отработано на ТЕКУЩЕЙ работе — обнуляется при смене работы
+    # (см. career_service.py — от этого зависит карьерный уровень)
+    job_shifts_worked: Mapped[int] = mapped_column(Integer, default=0)
     casino_last_bet_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
