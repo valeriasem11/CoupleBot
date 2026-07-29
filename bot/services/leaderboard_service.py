@@ -32,25 +32,22 @@ async def get_top_by_affection(session: AsyncSession, chat_id: int) -> list[Lead
 
 
 async def get_top_by_wealth(session: AsyncSession, chat_id: int) -> list[LeaderboardEntry]:
-    """Богатство = личные балансы обоих партнёров + семейный бюджет (если есть)."""
+    """
+    Богатство = семейный бюджет (наличные). Доступен только женатым парам —
+    семейный бюджет физически не может появиться до брака, поэтому пары,
+    которые ещё просто встречаются, в этой категории не участвуют.
+    """
     result = await session.execute(
         select(Relationship)
         .where(
             Relationship.chat_id == chat_id,
-            Relationship.status.in_([RelationshipStatus.ACTIVE, RelationshipStatus.MARRIED]),
+            Relationship.status == RelationshipStatus.MARRIED,
         )
+        .order_by(Relationship.family_budget.desc())
+        .limit(TOP_LIMIT)
     )
     relationships = result.scalars().all()
-
-    entries = [
-        LeaderboardEntry(
-            relationship=r,
-            value=r.user1.balance + r.user2.balance + r.family_budget,
-        )
-        for r in relationships
-    ]
-    entries.sort(key=lambda e: e.value, reverse=True)
-    return entries[:TOP_LIMIT]
+    return [LeaderboardEntry(relationship=r, value=r.family_budget) for r in relationships]
 
 
 async def get_top_by_children(session: AsyncSession, chat_id: int) -> list[LeaderboardEntry]:
