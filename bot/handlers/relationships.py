@@ -22,7 +22,7 @@ from bot.keyboards.relationships import (
     build_marry_keyboard,
     build_proposal_keyboard,
 )
-from bot.services.achievement_service import award, format_unlock_text
+from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.children_service import get_active_children_count
 from bot.services.relationship_service import (
     RelationshipError,
@@ -62,6 +62,14 @@ def _mention(user) -> str:
     if user.username:
         return f"@{user.username}"
     return user.first_name
+
+
+async def _send_achievement_notification(message_target, session, users, code):
+    """Выдаёт достижение сразу обоим партнёрам и шлёт ОДНО общее уведомление."""
+    newly_unlocked = await award_couple(session, users, code)
+    if newly_unlocked:
+        names = " и ".join(_mention(u) for u in newly_unlocked)
+        await message_target.answer(f"{names}\n{format_unlock_text(code)}")
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +130,9 @@ async def on_proposal_accept(callback: CallbackQuery, session: AsyncSession):
     await accept_proposal(session, relationship, callback.message.chat.id)
     await session.refresh(relationship)
 
-    for partner in (relationship.user1, relationship.user2):
-        if await award(session, partner, "first_relationship"):
-            await callback.message.answer(f"{_mention(partner)}\n{format_unlock_text('first_relationship')}")
+    await _send_achievement_notification(
+        callback.message, session, (relationship.user1, relationship.user2), "first_relationship"
+    )
 
     await callback.message.edit_text(
         f"💞 {_mention(relationship.user1)} и {_mention(relationship.user2)} теперь встречаются!\n\n"
@@ -219,17 +227,17 @@ async def on_action_selected(callback: CallbackQuery, session: AsyncSession):
 
     if result.stage_advanced:
         text += f"\n\n🎉 Новая стадия отношений: {result.new_stage.name}!"
-        if result.new_stage.order >= 3:
-            for partner_user in (relationship.user1, relationship.user2):
-                if await award(session, partner_user, "romantic"):
-                    await callback.message.answer(
-                        f"{_mention(partner_user)}\n{format_unlock_text('romantic')}"
-                    )
 
     if result.ready_for_marriage and relationship.status.value == "active":
         text += "\n\n💍 Пара накопила достаточно близости для брака! Используйте /marry."
 
     await callback.message.answer(text)
+
+    if result.stage_advanced and result.new_stage.order >= 3:
+        await _send_achievement_notification(
+            callback.message, session, (relationship.user1, relationship.user2), "romantic"
+        )
+
     await callback.answer()
 
 
@@ -327,9 +335,9 @@ async def on_marry_accept(callback: CallbackQuery, session: AsyncSession):
     await marry(session, relationship)
     await session.refresh(relationship)
 
-    for partner_user in (relationship.user1, relationship.user2):
-        if await award(session, partner_user, "married"):
-            await callback.message.answer(f"{_mention(partner_user)}\n{format_unlock_text('married')}")
+    await _send_achievement_notification(
+        callback.message, session, (relationship.user1, relationship.user2), "married"
+    )
 
     await callback.message.edit_text(
         f"👰🤵 {_mention(relationship.user1)} и {_mention(relationship.user2)} поженились! Поздравляем!\n\n"
@@ -407,9 +415,9 @@ async def on_breakup_confirm(callback: CallbackQuery, session: AsyncSession):
 
     result = await end_relationship(session, relationship)
 
-    for partner_user in (relationship.user1, relationship.user2):
-        if await award(session, partner_user, "broken_heart"):
-            await callback.message.answer(f"{_mention(partner_user)}\n{format_unlock_text('broken_heart')}")
+    await _send_achievement_notification(
+        callback.message, session, (relationship.user1, relationship.user2), "broken_heart"
+    )
 
     if result.was_married:
         text = "💔 Пара развелась."

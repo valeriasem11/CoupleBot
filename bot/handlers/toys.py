@@ -13,7 +13,7 @@ from bot.keyboards.children import (
     PICK_CHILD_TOY_PREFIX,
     build_toy_shop_keyboard,
 )
-from bot.services.achievement_service import award, format_unlock_text
+from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.children_service import ChildError, buy_toy, get_all_toys, get_child_by_id
 from bot.services.relationship_service import get_active_relationship
 
@@ -30,6 +30,12 @@ async def _get_user(message_or_callback, session: AsyncSession):
         first_name=from_user.first_name,
         chat_id=chat.id,
     )
+
+
+def _mention(user) -> str:
+    if user.username:
+        return f"@{user.username}"
+    return user.first_name
 
 
 async def send_toy_shop_for_child(target, child, session: AsyncSession, edit: bool):
@@ -104,8 +110,9 @@ async def on_buy_toy(callback: CallbackQuery, session: AsyncSession):
         f"Остаток семейного бюджета: {relationship.family_budget} 🪙"
     )
 
-    for partner_user in (relationship.user1, relationship.user2):
-        if await award(session, partner_user, "caring_parent"):
-            await callback.message.answer(format_unlock_text("caring_parent"))
+    newly_unlocked = await award_couple(session, (relationship.user1, relationship.user2), "caring_parent")
+    if newly_unlocked:
+        names = " и ".join(_mention(u) for u in newly_unlocked)
+        await callback.message.answer(f"{names}\n{format_unlock_text('caring_parent')}")
 
     await callback.answer()

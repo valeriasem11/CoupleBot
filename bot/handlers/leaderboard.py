@@ -7,7 +7,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards.leaderboard import TOP_CATEGORIES, TOP_CATEGORY_PREFIX, build_top_keyboard
-from bot.services.achievement_service import award, format_unlock_text
+from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.leaderboard_service import get_top_by_affection, get_top_by_children, get_top_by_wealth
 
 router = Router(name="leaderboard")
@@ -52,21 +52,24 @@ async def _render_leaderboard(
         value_str = f"{entry.value} {unit}".strip()
         lines.append(f"{place} {names} — {value_str}")
 
-    newly_unlocked = []
     top_relationship = entries[0].relationship
-    for partner_user in (top_relationship.user1, top_relationship.user2):
-        if await award(session, partner_user, "top_1"):
-            newly_unlocked.append(partner_user)
+    newly_unlocked = await award_couple(session, (top_relationship.user1, top_relationship.user2), "top_1")
 
     return "\n".join(lines), newly_unlocked
+
+
+async def _send_top1_notification(target, newly_unlocked):
+    if not newly_unlocked:
+        return
+    names = " и ".join(_mention(u) for u in newly_unlocked)
+    await target.answer(f"{names}\n{format_unlock_text('top_1')}")
 
 
 @router.message(Command("top"))
 async def cmd_top(message: Message, session: AsyncSession):
     text, newly_unlocked = await _render_leaderboard(message.chat.id, "affection", session)
     await message.answer(text, reply_markup=build_top_keyboard("affection"))
-    for user in newly_unlocked:
-        await message.answer(f"{_mention(user)}\n{format_unlock_text('top_1')}")
+    await _send_top1_notification(message, newly_unlocked)
 
 
 @router.callback_query(F.data.startswith(TOP_CATEGORY_PREFIX))
@@ -74,6 +77,5 @@ async def on_top_category(callback: CallbackQuery, session: AsyncSession):
     code = callback.data.removeprefix(TOP_CATEGORY_PREFIX)
     text, newly_unlocked = await _render_leaderboard(callback.message.chat.id, code, session)
     await callback.message.edit_text(text, reply_markup=build_top_keyboard(code))
-    for user in newly_unlocked:
-        await callback.message.answer(f"{_mention(user)}\n{format_unlock_text('top_1')}")
+    await _send_top1_notification(callback.message, newly_unlocked)
     await callback.answer()

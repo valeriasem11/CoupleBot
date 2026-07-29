@@ -14,7 +14,7 @@ from bot.keyboards.pet import (
     build_pet_actions_keyboard,
     build_pet_species_keyboard,
 )
-from bot.services.achievement_service import award, format_unlock_text
+from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.pet_service import (
     PET_ACTIONS,
     PetError,
@@ -101,9 +101,10 @@ async def on_pet_buy(callback: CallbackQuery, session: AsyncSession):
         f"Переименовать: /name_pet (имя)\nВзаимодействовать: /pet_actions"
     )
 
-    for partner_user in (relationship.user1, relationship.user2):
-        if await award(session, partner_user, "pet_owner"):
-            await callback.message.answer(f"{_mention(partner_user)}\n{format_unlock_text('pet_owner')}")
+    newly_unlocked = await award_couple(session, (relationship.user1, relationship.user2), "pet_owner")
+    if newly_unlocked:
+        names = " и ".join(_mention(u) for u in newly_unlocked)
+        await callback.message.answer(f"{names}\n{format_unlock_text('pet_owner')}")
 
     await callback.answer()
 
