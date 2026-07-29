@@ -1,12 +1,8 @@
 """
 Фоновый планировщик задач.
 
-Сейчас отвечает только за проверку "не пора ли родить" — раз в несколько минут
-сканирует беременности, чей срок подошёл, оформляет роды и сам пишет об этом
-в чат пары (используя сохранённый relationship.chat_id).
-
-В следующих этапах сюда добавятся: угасание настроения ребёнка со временем,
-автоматическое взросление, случайные события ("нарисовал(а) рисунок").
+Проверяет: не пора ли родить, взросление и настроение детей, напоминания
+по кредитам, и угасание настроения питомцев.
 """
 import logging
 
@@ -23,6 +19,7 @@ from bot.services.children_service import (
     process_children_tick,
 )
 from bot.services.economy_service import process_loans_tick
+from bot.services.pet_service import process_pets_tick
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +122,18 @@ async def _process_loans(bot: Bot) -> None:
                 logger.exception("Не удалось отправить напоминание о кредите")
 
 
+async def _process_pets(bot: Bot) -> None:
+    async with async_session_maker() as session:
+        events = await process_pets_tick(session)
+
+        for event in events:
+            text = f"🐾 {event.pet_name} убежал(а) — за ним/ней совсем не следили."
+            try:
+                await bot.send_message(event.chat_id, text)
+            except Exception:
+                logger.exception("Не удалось отправить уведомление об убежавшем питомце")
+
+
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -147,5 +156,12 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         minutes=CHECK_INTERVAL_MINUTES,
         args=[bot],
         id="process_loans",
+    )
+    scheduler.add_job(
+        _process_pets,
+        trigger="interval",
+        minutes=CHECK_INTERVAL_MINUTES,
+        args=[bot],
+        id="process_pets",
     )
     return scheduler
