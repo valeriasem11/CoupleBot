@@ -25,6 +25,7 @@ from bot.handlers import (
     relationships,
     shop,
     start,
+    surprise,
     toys,
 )
 from bot.services.scheduler import setup_scheduler
@@ -60,6 +61,7 @@ BOT_COMMANDS = [
     BotCommand(command="children", description="Список детей и их карточки"),
     BotCommand(command="child_actions", description="Взаимодействовать с ребёнком"),
     BotCommand(command="top", description="Рейтинг пар в этой беседе"),
+    BotCommand(command="surprise", description="Отправить анонимный сюрприз партнёру"),
     BotCommand(command="achievements", description="Достижения"),
     BotCommand(command="petshop", description="Завести питомца"),
     BotCommand(command="pet", description="Карточка питомца"),
@@ -119,6 +121,7 @@ async def main():
     dp.include_router(leaderboard.router)
     dp.include_router(achievements.router)
     dp.include_router(pet.router)
+    dp.include_router(surprise.router)
 
     # На всякий случай сбрасываем накопленные апдейты перед стартом polling
     await bot.delete_webhook(drop_pending_updates=True)
