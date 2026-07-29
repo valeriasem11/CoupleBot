@@ -21,6 +21,7 @@ from bot.handlers import (
     children,
     economy,
     leaderboard,
+    pet,
     relationships,
     shop,
     start,
@@ -60,6 +61,10 @@ BOT_COMMANDS = [
     BotCommand(command="child_actions", description="Взаимодействовать с ребёнком"),
     BotCommand(command="top", description="Рейтинг пар в этой беседе"),
     BotCommand(command="achievements", description="Достижения"),
+    BotCommand(command="petshop", description="Завести питомца"),
+    BotCommand(command="pet", description="Карточка питомца"),
+    BotCommand(command="name_pet", description="Переименовать питомца"),
+    BotCommand(command="pet_actions", description="Взаимодействовать с питомцем"),
 ]
 
 
@@ -113,6 +118,7 @@ async def main():
     dp.include_router(toys.router)
     dp.include_router(leaderboard.router)
     dp.include_router(achievements.router)
+    dp.include_router(pet.router)
 
     # На всякий случай сбрасываем накопленные апдейты перед стартом polling
     await bot.delete_webhook(drop_pending_updates=True)
