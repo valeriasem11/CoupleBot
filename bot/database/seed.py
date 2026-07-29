@@ -12,7 +12,17 @@ import asyncio
 from sqlalchemy import select
 
 from bot.database.engine import async_session_maker
-from bot.database.models import AgeStage, Car, ChildAction, House, Job, RelationshipAction, RelationshipStage, Toy
+from bot.database.models import (
+    AgeStage,
+    Car,
+    ChildAction,
+    House,
+    Job,
+    PetSpecies,
+    RelationshipAction,
+    RelationshipStage,
+    Toy,
+)
 
 
 # Все работы косметические — одинаковая базовая ЗП и кулдаун у всех,
@@ -144,6 +154,22 @@ TOYS = [
 ]
 
 
+# Виды питомцев — от бюджетных до экзотических подороже. Доступны без брака,
+# покупаются с личного баланса того, кто заводит (см. pet_service.py).
+PET_SPECIES = [
+    {"code": "hamster", "name": "🐹 Хомяк", "price": 150, "order": 1},
+    {"code": "rabbit", "name": "🐰 Кролик", "price": 250, "order": 2},
+    {"code": "cat", "name": "🐱 Кот", "price": 300, "order": 3},
+    {"code": "dog", "name": "🐶 Собака", "price": 500, "order": 4},
+    {"code": "hedgehog", "name": "🦔 Ёж", "price": 800, "order": 5},
+    {"code": "turtle", "name": "🐢 Черепаха", "price": 1000, "order": 6},
+    {"code": "parrot", "name": "🦜 Попугай", "price": 1500, "order": 7},
+    {"code": "fox", "name": "🦊 Лиса", "price": 3000, "order": 8},
+    {"code": "monkey", "name": "🐒 Обезьянка", "price": 5000, "order": 9},
+    {"code": "sloth", "name": "🦥 Ленивец", "price": 8000, "order": 10},
+]
+
+
 async def seed_table(session, model, rows: list[dict], unique_field: str = "code"):
     """
     "Умное" (декларативное) заполнение справочника:
@@ -195,6 +221,7 @@ async def main():
         await seed_table(session, RelationshipAction, RELATIONSHIP_ACTIONS)
         await seed_table(session, ChildAction, CHILD_ACTIONS)
         await seed_table(session, Toy, TOYS)
+        await seed_table(session, PetSpecies, PET_SPECIES)
     print("Справочники успешно заполнены.")
 
 

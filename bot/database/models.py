@@ -336,3 +336,44 @@ class Child(Base):
     born_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     relationship_: Mapped["Relationship"] = relationship(lazy="joined")
+
+
+class PetSpecies(Base):
+    """Справочник видов питомцев, доступных для покупки."""
+
+    __tablename__ = "pet_species"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    price: Mapped[int] = mapped_column(Integer)
+    order: Mapped[int] = mapped_column(Integer, unique=True)
+
+
+class Pet(Base):
+    """
+    Питомец пары. В отличие от детей — доступен без брака, покупается с
+    личного баланса того, кто заводит, без стадий взросления.
+    """
+
+    __tablename__ = "pets"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    relationship_id: Mapped[int] = mapped_column(ForeignKey("relationships.id"))
+    species_id: Mapped[int] = mapped_column(ForeignKey("pet_species.id"))
+
+    name: Mapped[str] = mapped_column(String(100))
+    mood: Mapped[int] = mapped_column(Integer, default=100)
+
+    adopted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_interaction_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_mood_decay_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    relationship_: Mapped["Relationship"] = relationship(lazy="joined")
+    species: Mapped["PetSpecies"] = relationship(lazy="joined")
