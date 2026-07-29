@@ -9,6 +9,7 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import get_or_create_user
+from bot.services.achievement_service import award, check_balance_milestones, format_unlock_text
 from bot.services.casino_service import (
     MIN_BET,
     CasinoError,
@@ -104,3 +105,10 @@ async def cmd_casino(message: Message, command: CommandObject, session: AsyncSes
         )
 
     await message.answer(text)
+
+    if result.is_jackpot:
+        if await award(session, user, "lucky"):
+            await message.answer(format_unlock_text("lucky"))
+
+    for code in await check_balance_milestones(session, user):
+        await message.answer(format_unlock_text(code))

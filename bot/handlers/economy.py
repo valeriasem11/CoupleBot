@@ -13,6 +13,7 @@ from bot.database.crud import (
     set_user_job,
 )
 from bot.keyboards.economy import JOB_CALLBACK_PREFIX, build_jobs_keyboard
+from bot.services.achievement_service import award, check_balance_milestones, format_unlock_text
 from bot.services.economy_service import (
     WorkOutcome,
     LoanError,
@@ -125,6 +126,9 @@ async def cmd_work(message: Message, session: AsyncSession):
 
     await message.answer(text)
 
+    for code in await check_balance_milestones(session, user):
+        await message.answer(format_unlock_text(code))
+
 
 def _parse_amount(command: CommandObject) -> int | None:
     if command.args is None:
@@ -180,6 +184,8 @@ async def cmd_repay(message: Message, command: CommandObject, session: AsyncSess
 
     if user.loan_amount == 0:
         await message.answer(f"✅ Погашено {actual_repay} 🪙. Кредит полностью закрыт! 🎉")
+        if await award(session, user, "credit_history"):
+            await message.answer(format_unlock_text("credit_history"))
     else:
         await message.answer(
             f"✅ Погашено {actual_repay} 🪙.\n"

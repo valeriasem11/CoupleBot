@@ -20,6 +20,7 @@ from bot.keyboards.shop import (
     build_houses_keyboard,
     build_shop_menu_keyboard,
 )
+from bot.services.achievement_service import award, format_unlock_text
 from bot.services.children_service import get_children
 from bot.handlers.toys import send_toy_shop_for_child
 from bot.services.family_service import (
@@ -268,6 +269,12 @@ async def on_buy_house(callback: CallbackQuery, session: AsyncSession):
         f"🎉 {_mention(user)} и {_mention(partner)} {verb}: {house.name}!\n\n"
         f"Остаток семейного бюджета: {relationship.family_budget} 🪙"
     )
+
+    if not had_house_before:
+        for partner_user in (relationship.user1, relationship.user2):
+            if await award(session, partner_user, "new_home"):
+                await callback.message.answer(f"{_mention(partner_user)}\n{format_unlock_text('new_home')}")
+
     await callback.answer()
 
 
@@ -299,4 +306,10 @@ async def on_buy_car(callback: CallbackQuery, session: AsyncSession):
         f"🎉 {_mention(user)} и {_mention(partner)} {verb}: {car.name}!\n\n"
         f"Остаток семейного бюджета: {relationship.family_budget} 🪙"
     )
+
+    if not had_car_before:
+        for partner_user in (relationship.user1, relationship.user2):
+            if await award(session, partner_user, "wheels"):
+                await callback.message.answer(f"{_mention(partner_user)}\n{format_unlock_text('wheels')}")
+
     await callback.answer()
