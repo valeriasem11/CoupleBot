@@ -84,6 +84,19 @@ async def get_all_achievements_status(session: AsyncSession, user_id: int) -> li
     ]
 
 
+async def award_couple(session: AsyncSession, users, code: str) -> list[User]:
+    """
+    Выдаёт достижение сразу обоим партнёрам. Возвращает список тех, кому
+    оно было выдано именно сейчас — чтобы отправить ОДНО общее уведомление
+    на обоих, а не два отдельных подряд.
+    """
+    newly_unlocked = []
+    for u in users:
+        if await award(session, u, code):
+            newly_unlocked.append(u)
+    return newly_unlocked
+
+
 async def check_balance_milestones(session: AsyncSession, user: User) -> list[str]:
     """
     Проверяет денежные вехи по текущему балансу пользователя.
