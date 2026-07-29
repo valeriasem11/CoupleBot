@@ -15,7 +15,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.database.engine import async_session_maker
 from bot.keyboards.children import build_event_keyboard
-from bot.services.children_service import get_due_pregnancies, give_birth, process_children_tick
+from bot.services.achievement_service import award, format_unlock_text
+from bot.services.children_service import (
+    get_active_children_count,
+    get_due_pregnancies,
+    give_birth,
+    process_children_tick,
+)
 from bot.services.economy_service import process_loans_tick
 
 logger = logging.getLogger(__name__)
@@ -51,6 +57,26 @@ async def _check_pregnancies(bot: Bot) -> None:
                 logger.exception(
                     "Не удалось отправить уведомление о рождении ребёнка id=%s", child.id
                 )
+
+            for partner_user in (relationship.user1, relationship.user2):
+                if await award(session, partner_user, "parent"):
+                    try:
+                        await bot.send_message(
+                            relationship.chat_id, format_unlock_text("parent")
+                        )
+                    except Exception:
+                        logger.exception("Не удалось отправить уведомление о достижении")
+
+            active_children_count = await get_active_children_count(session, relationship.id)
+            if active_children_count >= 3:
+                for partner_user in (relationship.user1, relationship.user2):
+                    if await award(session, partner_user, "big_family"):
+                        try:
+                            await bot.send_message(
+                                relationship.chat_id, format_unlock_text("big_family")
+                            )
+                        except Exception:
+                            logger.exception("Не удалось отправить уведомление о достижении")
 
 
 async def _process_children_growth_and_mood(bot: Bot) -> None:
