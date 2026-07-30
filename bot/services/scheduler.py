@@ -21,6 +21,7 @@ from bot.services.children_service import (
 from bot.services.economy_service import process_loans_tick
 from bot.services.pet_service import process_pets_tick
 from bot.services.chat_event_service import roll_random_events
+from bot.services.anniversary_service import process_anniversaries_tick
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,17 @@ async def _process_chat_events(bot: Bot) -> None:
                 logger.exception("Не удалось отправить уведомление об общем событии")
 
 
+async def _process_anniversaries(bot: Bot) -> None:
+    async with async_session_maker() as session:
+        events = await process_anniversaries_tick(session)
+
+        for event in events:
+            try:
+                await bot.send_message(event.chat_id, event.title)
+            except Exception:
+                logger.exception("Не удалось отправить уведомление о годовщине")
+
+
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -190,5 +202,12 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         minutes=CHECK_INTERVAL_MINUTES,
         args=[bot],
         id="process_chat_events",
+    )
+    scheduler.add_job(
+        _process_anniversaries,
+        trigger="interval",
+        minutes=CHECK_INTERVAL_MINUTES,
+        args=[bot],
+        id="process_anniversaries",
     )
     return scheduler
