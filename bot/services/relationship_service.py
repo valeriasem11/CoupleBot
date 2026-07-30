@@ -4,6 +4,7 @@
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import random
 
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -89,15 +90,47 @@ async def create_proposal(session: AsyncSession, proposer: User, target: User) -
     return relationship
 
 
-async def accept_proposal(session: AsyncSession, relationship: Relationship, chat_id: int) -> None:
+COMPATIBILITY_TIERS = [
+    (95, "✨ Родственные души!", 50),
+    (80, "💕 Отличная совместимость!", 25),
+    (65, "💫 Хорошая совместимость!", 10),
+    (0, "🤔 Неплохое начало", 0),
+]
+
+
+@dataclass
+class ProposalAcceptResult:
+    compatibility_percent: int
+    compatibility_label: str
+    starting_affection: int
+
+
+def _roll_compatibility() -> ProposalAcceptResult:
+    percent = random.randint(50, 100)
+    for threshold, label, bonus in COMPATIBILITY_TIERS:
+        if percent >= threshold:
+            return ProposalAcceptResult(
+                compatibility_percent=percent,
+                compatibility_label=label,
+                starting_affection=bonus,
+            )
+    return ProposalAcceptResult(percent, "🤔 Неплохое начало", 0)  # на всякий случай
+
+
+async def accept_proposal(
+    session: AsyncSession, relationship: Relationship, chat_id: int
+) -> ProposalAcceptResult:
     first_stage = await _get_stage_by_order(session, 1)
+    compatibility = _roll_compatibility()
 
     relationship.status = RelationshipStatus.ACTIVE
     relationship.stage_id = first_stage.id
-    relationship.affection_points = 0
+    relationship.affection_points = compatibility.starting_affection
     relationship.started_at = datetime.now(timezone.utc)
     relationship.chat_id = chat_id
     await session.commit()
+
+    return compatibility
 
 
 async def reject_proposal(session: AsyncSession, relationship: Relationship) -> None:
