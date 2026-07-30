@@ -226,6 +226,8 @@ class Relationship(Base):
     # была ли последняя попытка зачатия успешной — от этого зависит длительность
     # кулдауна до следующей попытки (см. children_service.py)
     last_conception_was_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    # включена ли защита — если да, зачатие полностью блокируется (см. children_service.py)
+    protection_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     last_travel_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -359,6 +361,9 @@ class Child(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # определяется случайно в момент зачатия (см. MISCARRIAGE_CHANCE) — если True,
+    # вместо родов на планировщике произойдёт выкидыш
+    will_miscarry: Mapped[bool] = mapped_column(Boolean, default=False)
     born_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     relationship_: Mapped["Relationship"] = relationship(lazy="joined")
