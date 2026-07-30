@@ -114,7 +114,7 @@ async def cmd_work(message: Message, session: AsyncSession):
     remaining = get_work_cooldown_remaining(user, job)
     if remaining is not None:
         await message.answer(
-            f"Ты уже отработала смену недавно. "
+            f"Ты уже отработал(а) смену недавно. "
             f"Приходи через {format_timedelta(remaining)}."
         )
         return
@@ -134,7 +134,7 @@ async def cmd_work(message: Message, session: AsyncSession):
             f"{result.total} 🪙"
         )
     else:
-        text = f"Ты отработала смену и заработала {result.total} 🪙."
+        text = f"Ты отработал(а) смену и заработал(а) {result.total} 🪙."
 
     await message.answer(text)
 
