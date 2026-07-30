@@ -20,6 +20,7 @@ from bot.handlers import (
     child_actions,
     children,
     economy,
+    gift,
     leaderboard,
     pet,
     relationships,
@@ -66,6 +67,7 @@ BOT_COMMANDS = [
     BotCommand(command="surprise", description="Отправить анонимный сюрприз партнёру"),
     BotCommand(command="travel", description="Отправиться в путешествие (в браке)"),
     BotCommand(command="stats", description="Личная статистика"),
+    BotCommand(command="gift", description="Подарить подарок партнёру"),
     BotCommand(command="achievements", description="Достижения"),
     BotCommand(command="petshop", description="Завести питомца"),
     BotCommand(command="pet", description="Карточка питомца"),
@@ -128,6 +130,7 @@ async def main():
     dp.include_router(surprise.router)
     dp.include_router(travel.router)
     dp.include_router(stats.router)
+    dp.include_router(gift.router)
 
     # На всякий случай сбрасываем накопленные апдейты перед стартом polling
     await bot.delete_webhook(drop_pending_updates=True)
