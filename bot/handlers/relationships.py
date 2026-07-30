@@ -128,15 +128,23 @@ async def on_proposal_accept(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Это предложение адресовано не тебе.", show_alert=True)
         return
 
-    await accept_proposal(session, relationship, callback.message.chat.id)
+    compatibility = await accept_proposal(session, relationship, callback.message.chat.id)
     await session.refresh(relationship)
 
     await _send_achievement_notification(
         callback.message, session, (relationship.user1, relationship.user2), "first_relationship"
     )
 
+    bonus_line = (
+        f"\n💝 Стартовый бонус: +{compatibility.starting_affection} ❤️"
+        if compatibility.starting_affection > 0
+        else ""
+    )
+
     await callback.message.edit_text(
         f"💞 {_mention(relationship.user1)} и {_mention(relationship.user2)} теперь встречаются!\n\n"
+        f"🧠 Тест на совместимость: {compatibility.compatibility_percent}%\n"
+        f"{compatibility.compatibility_label}{bonus_line}\n\n"
         f"Стадия: {relationship.stage.name}\n"
         f"Используйте /actions, чтобы взаимодействовать друг с другом."
     )
