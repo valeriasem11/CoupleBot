@@ -215,6 +215,15 @@ class Relationship(Base):
     # была ли последняя попытка зачатия успешной — от этого зависит длительность
     # кулдауна до следующей попытки (см. children_service.py)
     last_conception_was_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_travel_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_travel_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_travel_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user1: Mapped["User"] = relationship(foreign_keys=[user1_id], lazy="joined")
     user2: Mapped["User"] = relationship(foreign_keys=[user2_id], lazy="joined")
@@ -342,6 +351,38 @@ class Child(Base):
     born_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     relationship_: Mapped["Relationship"] = relationship(lazy="joined")
+
+
+class ChatEvent(Base):
+    """
+    Общее случайное событие на весь чат (например, "фестиваль в городе") —
+    временно даёт бонус к близости всем парам в этом чате.
+    """
+
+    __tablename__ = "chat_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    affection_bonus_percent: Mapped[int] = mapped_column(Integer)  # 20 = +20%
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TravelDestination(Base):
+    """Справочник направлений для путешествий — доступны только в браке."""
+
+    __tablename__ = "travel_destinations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    price: Mapped[int] = mapped_column(Integer)
+    affection_reward: Mapped[int] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(String(300))
+    order: Mapped[int] = mapped_column(Integer, unique=True)
 
 
 class PetSpecies(Base):

@@ -21,6 +21,7 @@ from bot.database.models import (
     PetSpecies,
     RelationshipAction,
     RelationshipStage,
+    TravelDestination,
     Toy,
 )
 
@@ -170,6 +171,44 @@ PET_SPECIES = [
 ]
 
 
+# Направления для путешествий — доступны только в браке, оплата из семейного
+# бюджета. Награда близости растёт вместе с ценой направления.
+TRAVEL_DESTINATIONS = [
+    {
+        "code": "sochi", "name": "🏖️ Сочи", "price": 3000, "affection_reward": 30, "order": 1,
+        "description": "Тёплое море, шум прибоя и закат на набережной — идеальный бюджетный побег от рутины.",
+    },
+    {
+        "code": "rome", "name": "🏛️ Рим", "price": 6000, "affection_reward": 55, "order": 2,
+        "description": "Прогулка среди древних развалин, паста на маленькой площади и поцелуй у фонтана Треви.",
+    },
+    {
+        "code": "paris", "name": "🗼 Париж", "price": 8000, "affection_reward": 70, "order": 3,
+        "description": "Эйфелева башня в огнях, круассаны на завтрак и романтика в каждом переулке.",
+    },
+    {
+        "code": "bali", "name": "🌴 Бали", "price": 12000, "affection_reward": 100, "order": 4,
+        "description": "Рисовые террасы, океан на закате и полное ощущение, что время остановилось только для вас двоих.",
+    },
+    {
+        "code": "new_york", "name": "🗽 Нью-Йорк", "price": 15000, "affection_reward": 120, "order": 5,
+        "description": "Огни Таймс-сквер, вид с крыши небоскрёба и город, который никогда не спит — как и ваша любовь.",
+    },
+    {
+        "code": "tokyo", "name": "🏯 Токио", "price": 18000, "affection_reward": 140, "order": 6,
+        "description": "Неоновые улицы, сакура в парке и суши в маленьком ресторанчике на двоих.",
+    },
+    {
+        "code": "maldives", "name": "🏝️ Мальдивы", "price": 25000, "affection_reward": 180, "order": 7,
+        "description": "Бунгало над водой, кристально чистый океан и абсолютная роскошь только для вас.",
+    },
+    {
+        "code": "space", "name": "🚀 Космический тур", "price": 100000, "affection_reward": 500, "order": 8,
+        "description": "Невесомость, вид на Землю через иллюминатор и признание в любви на орбите — такое не забывается.",
+    },
+]
+
+
 async def seed_table(session, model, rows: list[dict], unique_field: str = "code"):
     """
     "Умное" (декларативное) заполнение справочника:
@@ -222,6 +261,7 @@ async def main():
         await seed_table(session, ChildAction, CHILD_ACTIONS)
         await seed_table(session, Toy, TOYS)
         await seed_table(session, PetSpecies, PET_SPECIES)
+        await seed_table(session, TravelDestination, TRAVEL_DESTINATIONS)
     print("Справочники успешно заполнены.")
 
 
