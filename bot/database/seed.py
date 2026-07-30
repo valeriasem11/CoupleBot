@@ -16,6 +16,7 @@ from bot.database.models import (
     AgeStage,
     Car,
     ChildAction,
+    GiftItem,
     House,
     Job,
     PetSpecies,
@@ -209,6 +210,18 @@ TRAVEL_DESTINATIONS = [
 ]
 
 
+GIFT_ITEMS = [
+    {"code": "tulips", "name": "🌷 Тюльпаны", "price": 200, "affection_reward": 5, "order": 1},
+    {"code": "candy_box", "name": "🍫 Коробка конфет", "price": 350, "affection_reward": 9, "order": 2},
+    {"code": "teddy_bear", "name": "🧸 Плюшевый мишка", "price": 500, "affection_reward": 12, "order": 3},
+    {"code": "roses", "name": "🌹 Букет роз", "price": 700, "affection_reward": 16, "order": 4},
+    {"code": "makeup_set", "name": "💄 Набор косметики", "price": 1200, "affection_reward": 26, "order": 5},
+    {"code": "designer_bag", "name": "👜 Брендовая сумка", "price": 2500, "affection_reward": 55, "order": 6},
+    {"code": "watch", "name": "⌚ Наручные часы", "price": 4000, "affection_reward": 85, "order": 7},
+    {"code": "jewelry", "name": "💍 Украшение с камнем", "price": 7000, "affection_reward": 150, "order": 8},
+]
+
+
 async def seed_table(session, model, rows: list[dict], unique_field: str = "code"):
     """
     "Умное" (декларативное) заполнение справочника:
@@ -262,6 +275,7 @@ async def main():
         await seed_table(session, Toy, TOYS)
         await seed_table(session, PetSpecies, PET_SPECIES)
         await seed_table(session, TravelDestination, TRAVEL_DESTINATIONS)
+        await seed_table(session, GiftItem, GIFT_ITEMS)
     print("Справочники успешно заполнены.")
 
 

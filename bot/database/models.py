@@ -149,6 +149,9 @@ class User(Base):
     surprise_last_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    gift_last_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -377,6 +380,19 @@ class ChatEvent(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class GiftItem(Base):
+    """Справочник подарков партнёру — в отличие от /surprise, не анонимно."""
+
+    __tablename__ = "gift_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(100))
+    price: Mapped[int] = mapped_column(Integer)
+    affection_reward: Mapped[int] = mapped_column(Integer)
+    order: Mapped[int] = mapped_column(Integer, unique=True)
 
 
 class TravelDestination(Base):
