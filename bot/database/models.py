@@ -127,6 +127,10 @@ class User(Base):
     chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     balance: Mapped[int] = mapped_column(Integer, default=0)
+    # статистика "за всё время" — не сбрасывается, в отличие от текущего баланса
+    # и карьерного прогресса (см. /stats, handlers/stats.py)
+    lifetime_earned: Mapped[int] = mapped_column(Integer, default=0)
+    lifetime_work_count: Mapped[int] = mapped_column(Integer, default=0)
     loan_amount: Mapped[int] = mapped_column(Integer, default=0)  # текущий долг (уже с переплатой)
     loan_last_charge_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
