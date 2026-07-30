@@ -13,6 +13,7 @@ from bot.database.models import ChildStatus
 from bot.services.children_service import (
     AGE_STAGE_LABELS,
     ChildError,
+    end_pregnancy,
     ensure_can_try_conceive,
     format_timedelta,
     get_active_children_count,
@@ -20,6 +21,7 @@ from bot.services.children_service import (
     get_conception_cooldown_remaining,
     mood_label,
     name_child,
+    set_protection,
     trait_codes_to_labels,
     toy_codes_to_labels,
     try_conceive,
@@ -154,3 +156,60 @@ async def cmd_children(message: Message, session: AsyncSession):
         )
 
     await message.answer("\n\n----------\n\n".join(blocks))
+
+
+# ---------------------------------------------------------------------------
+# /protection — включить/выключить защиту от зачатия
+# ---------------------------------------------------------------------------
+
+
+@router.message(Command("protection"))
+async def cmd_protection(message: Message, command: CommandObject, session: AsyncSession):
+    arg = (command.args or "").strip().lower()
+    if arg not in ("on", "off", "вкл", "выкл"):
+        await message.answer(
+            "Укажи, включить или выключить защиту:\n"
+            "/protection on — включить (зачатие будет заблокировано)\n"
+            "/protection off — выключить"
+        )
+        return
+
+    enabled = arg in ("on", "вкл")
+
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id)
+    if relationship is None:
+        await message.answer("У тебя пока нет пары.")
+        return
+
+    await set_protection(session, relationship, enabled)
+
+    if enabled:
+        await message.answer("🛡 Защита включена — зачатие ребёнка теперь заблокировано.")
+    else:
+        await message.answer("🛡 Защита выключена — зачатие снова возможно.")
+
+
+# ---------------------------------------------------------------------------
+# /end_pregnancy — прервать текущую беременность
+# ---------------------------------------------------------------------------
+
+
+@router.message(Command("end_pregnancy"))
+async def cmd_end_pregnancy(message: Message, session: AsyncSession):
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id)
+    if relationship is None:
+        await message.answer("У тебя пока нет пары.")
+        return
+
+    try:
+        await end_pregnancy(session, relationship)
+    except ChildError as e:
+        await message.answer(str(e))
+        return
+
+    await message.answer(
+        "Беременность прервана по вашему решению.\n"
+        "Следующая попытка зачатия будет доступна через 12 часов."
+    )
