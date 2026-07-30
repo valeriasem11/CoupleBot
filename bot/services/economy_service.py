@@ -112,6 +112,8 @@ async def perform_work(session: AsyncSession, user: User, job: Job) -> WorkResul
     outcome, bonus_amount, total = calculate_work_result(effective_salary)
 
     user.balance += total
+    user.lifetime_earned += total
+    user.lifetime_work_count += 1
     user.job_last_used_at = datetime.now(timezone.utc)
     user.job_shifts_worked += 1
 

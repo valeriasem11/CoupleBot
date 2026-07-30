@@ -52,6 +52,17 @@ def get_partner(relationship: Relationship, user_id: int) -> User:
     return relationship.user2 if relationship.user1_id == user_id else relationship.user1
 
 
+async def count_past_breakups(session: AsyncSession, user_id: int) -> int:
+    """Сколько раз у пользователя реально заканчивались отношения (расставание/развод)."""
+    result = await session.execute(
+        select(Relationship).where(
+            or_(Relationship.user1_id == user_id, Relationship.user2_id == user_id),
+            Relationship.status == RelationshipStatus.DIVORCED,
+        )
+    )
+    return len(result.scalars().all())
+
+
 # ---------------------------------------------------------------------------
 # Предложение отношений
 # ---------------------------------------------------------------------------
