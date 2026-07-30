@@ -16,6 +16,8 @@ CONCEPTION_CHANCE = 0.20
 CONCEPTION_COOLDOWN_AFTER_FAILURE = timedelta(hours=12)
 CONCEPTION_COOLDOWN_AFTER_SUCCESS = timedelta(days=7)
 PREGNANCY_DURATION = timedelta(days=3)
+# случайный шанс на выкидыш за всю беременность — не зависит от действий игрока
+MISCARRIAGE_CHANCE = 0.05
 
 # Общий кулдаун между ЛЮБЫМИ действиями с одним и тем же ребёнком
 CHILD_ACTION_COOLDOWN = timedelta(hours=6)
@@ -140,25 +142,40 @@ async def try_conceive(session: AsyncSession, relationship: Relationship) -> Con
     Пробует зачать ребёнка. Проверки (брак, дом, свободное место, кулдаун)
     должны быть сделаны ЗАРАНЕЕ вызывающим кодом — эта функция только
     разыгрывает шанс и обновляет кулдаун попытки.
+
+    Если у пары включена защита (protection_enabled) — зачатие полностью
+    блокируется, шанс не разыгрывается вообще.
     """
     now = datetime.now(timezone.utc)
-    success = random.random() < CONCEPTION_CHANCE
+
+    if relationship.protection_enabled:
+        success = False
+    else:
+        success = random.random() < CONCEPTION_CHANCE
 
     relationship.last_conception_attempt_at = now
     relationship.last_conception_was_success = success
 
     child = None
     if success:
+        will_miscarry = random.random() < MISCARRIAGE_CHANCE
         child = Child(
             relationship_id=relationship.id,
             status=ChildStatus.PREGNANT,
             conceived_at=now,
             due_at=now + PREGNANCY_DURATION,
+            will_miscarry=will_miscarry,
         )
         session.add(child)
 
     await session.commit()
     return ConceptionResult(success=success, child=child)
+
+
+async def set_protection(session: AsyncSession, relationship: Relationship, enabled: bool) -> None:
+    """Включает/выключает защиту от зачатия."""
+    relationship.protection_enabled = enabled
+    await session.commit()
 
 
 def ensure_can_try_conceive(relationship: Relationship, active_children_count: int) -> None:
@@ -171,6 +188,28 @@ def ensure_can_try_conceive(relationship: Relationship, active_children_count: i
             f"В вашем доме («{relationship.house.name}») больше нет места для детей. "
             f"Купите дом побольше в /shop."
         )
+
+
+async def end_pregnancy(session: AsyncSession, relationship: Relationship) -> None:
+    """
+    Прерывает текущую беременность по решению пары. Устанавливает такой же
+    кулдаун, как после неудачной попытки зачатия (12 часов), а не полноценный
+    "послеродовой" (7 дней) — ведь ребёнок не родился.
+    """
+    result = await session.execute(
+        select(Child).where(
+            Child.relationship_id == relationship.id,
+            Child.status == ChildStatus.PREGNANT,
+        )
+    )
+    child = result.scalars().first()
+    if child is None:
+        raise ChildError("У вашей пары сейчас нет беременности.")
+
+    await session.delete(child)
+    relationship.last_conception_attempt_at = datetime.now(timezone.utc)
+    relationship.last_conception_was_success = False
+    await session.commit()
 
 
 # ---------------------------------------------------------------------------

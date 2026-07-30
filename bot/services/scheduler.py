@@ -34,6 +34,24 @@ async def _check_pregnancies(bot: Bot) -> None:
 
         for child in due_children:
             relationship = child.relationship_
+
+            if child.will_miscarry:
+                if relationship.chat_id is not None:
+                    text = (
+                        "💔 К сожалению, беременность прервалась сама собой — случился выкидыш. "
+                        "Это никак не связано с тем, что вы делали или не делали — так иногда "
+                        "просто бывает. Можете попробовать ещё раз, когда будете готовы."
+                    )
+                    try:
+                        await bot.send_message(relationship.chat_id, text)
+                    except Exception:
+                        logger.exception(
+                            "Не удалось отправить уведомление о выкидыше, ребёнок id=%s", child.id
+                        )
+                await session.delete(child)
+                await session.commit()
+                continue
+
             await give_birth(session, child)
 
             if relationship.chat_id is None:
