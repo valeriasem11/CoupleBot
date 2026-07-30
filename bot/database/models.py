@@ -209,6 +209,10 @@ class Relationship(Base):
     married_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # последняя отпразднованная годовщина (в днях) — чтобы не поздравлять
+    # с одной и той же датой много раз за день (планировщик тикает часто)
+    last_together_anniversary: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_married_anniversary: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # ID чата, где пара играет — нужен, чтобы бот мог САМ написать в чат
     # (например, объявить о рождении ребёнка), не дожидаясь чьей-то команды.
     # Записывается в момент принятия предложения отношений.
