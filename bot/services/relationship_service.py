@@ -16,6 +16,7 @@ from bot.database.models import (
     RelationshipStatus,
     User,
 )
+from bot.services.chat_event_service import get_active_bonus_percent
 
 
 class RelationshipError(Exception):
@@ -192,6 +193,8 @@ class ActionResult:
     stage_advanced: bool
     new_stage: RelationshipStage | None
     ready_for_marriage: bool
+    affection_gained: int  # сколько реально начислено (с учётом бонуса события)
+    event_bonus_percent: int  # 0, если бонуса не было
 
 
 async def perform_action(
@@ -201,11 +204,12 @@ async def perform_action(
     performer_id: int,
 ) -> ActionResult:
     """
-    Выполняет действие: логирует его, начисляет очки близости,
+    Выполняет действие: логирует его, начисляет очки близости (с учётом
+    временного бонуса от общего события чата, если оно сейчас активно),
     проверяет и применяет автоматическую прогрессию стадии (кроме брака).
 
     Кулдаун должен быть проверен ЗАРАНЕЕ вызывающим кодом через
-    get_action_cooldown_remaining.
+    get_relationship_cooldown_remaining.
     """
     session.add(
         ActionLog(
@@ -214,7 +218,13 @@ async def perform_action(
             performed_by_user_id=performer_id,
         )
     )
-    relationship.affection_points += action.affection_reward
+
+    event_bonus_percent = 0
+    if relationship.chat_id is not None:
+        event_bonus_percent = await get_active_bonus_percent(session, relationship.chat_id)
+
+    affection_gained = round(action.affection_reward * (1 + event_bonus_percent / 100))
+    relationship.affection_points += affection_gained
 
     stage_advanced, new_stage, ready_for_marriage = await _advance_stage_if_needed(session, relationship)
 
@@ -225,6 +235,8 @@ async def perform_action(
         stage_advanced=stage_advanced,
         new_stage=new_stage,
         ready_for_marriage=ready_for_marriage,
+        affection_gained=affection_gained,
+        event_bonus_percent=event_bonus_percent,
     )
 
 

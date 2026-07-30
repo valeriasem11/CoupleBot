@@ -20,6 +20,7 @@ from bot.services.children_service import (
 )
 from bot.services.economy_service import process_loans_tick
 from bot.services.pet_service import process_pets_tick
+from bot.services.chat_event_service import roll_random_events
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,17 @@ async def _process_pets(bot: Bot) -> None:
                 logger.exception("Не удалось отправить уведомление об убежавшем питомце")
 
 
+async def _process_chat_events(bot: Bot) -> None:
+    async with async_session_maker() as session:
+        new_events = await roll_random_events(session)
+
+        for event in new_events:
+            try:
+                await bot.send_message(event.chat_id, event.title)
+            except Exception:
+                logger.exception("Не удалось отправить уведомление об общем событии")
+
+
 def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -171,5 +183,12 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         minutes=CHECK_INTERVAL_MINUTES,
         args=[bot],
         id="process_pets",
+    )
+    scheduler.add_job(
+        _process_chat_events,
+        trigger="interval",
+        minutes=CHECK_INTERVAL_MINUTES,
+        args=[bot],
+        id="process_chat_events",
     )
     return scheduler
