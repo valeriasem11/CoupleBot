@@ -223,7 +223,9 @@ async def on_action_selected(callback: CallbackQuery, session: AsyncSession):
     await session.refresh(relationship)
 
     partner = get_partner(relationship, user.id)
-    text = f"{action.emoji} | {_mention(user)} {action.log_verb} {_mention(partner)} (+{action.affection_reward} ❤️)"
+    text = f"{action.emoji} | {_mention(user)} {action.log_verb} {_mention(partner)} (+{result.affection_gained} ❤️)"
+    if result.event_bonus_percent > 0:
+        text += f"\n✨ Бонус общего события: +{result.event_bonus_percent}%"
 
     if result.stage_advanced:
         text += f"\n\n🎉 Новая стадия отношений: {result.new_stage.name}!"
