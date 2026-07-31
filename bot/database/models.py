@@ -228,6 +228,8 @@ class Relationship(Base):
     last_conception_was_success: Mapped[bool] = mapped_column(Boolean, default=False)
     # включена ли защита — если да, зачатие полностью блокируется (см. children_service.py)
     protection_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # пара сейчас "в обиде" — блокирует /actions, пока кто-то не простит
+    is_offended: Mapped[bool] = mapped_column(Boolean, default=False)
     last_travel_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
