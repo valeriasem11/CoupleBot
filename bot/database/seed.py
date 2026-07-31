@@ -211,14 +211,16 @@ TRAVEL_DESTINATIONS = [
 
 
 GIFT_ITEMS = [
-    {"code": "tulips", "name": "🌷 Тюльпаны", "price": 200, "affection_reward": 5, "order": 1},
-    {"code": "candy_box", "name": "🍫 Коробка конфет", "price": 350, "affection_reward": 9, "order": 2},
-    {"code": "teddy_bear", "name": "🧸 Плюшевый мишка", "price": 500, "affection_reward": 12, "order": 3},
-    {"code": "roses", "name": "🌹 Букет роз", "price": 700, "affection_reward": 16, "order": 4},
-    {"code": "makeup_set", "name": "💄 Набор косметики", "price": 1200, "affection_reward": 26, "order": 5},
-    {"code": "designer_bag", "name": "👜 Брендовая сумка", "price": 2500, "affection_reward": 55, "order": 6},
-    {"code": "watch", "name": "⌚ Наручные часы", "price": 4000, "affection_reward": 85, "order": 7},
-    {"code": "jewelry", "name": "💍 Украшение с камнем", "price": 7000, "affection_reward": 150, "order": 8},
+    {"code": "candy_box", "name": "🍫 Коробка конфет", "price": 350, "affection_reward": 9, "order": 1},
+    {"code": "teddy_bear", "name": "🧸 Мягкая игрушка", "price": 500, "affection_reward": 12, "order": 2},
+    {"code": "flowers", "name": "💐 Букет цветов", "price": 700, "affection_reward": 16, "order": 3},
+    {"code": "headphones", "name": "🎧 Наушники", "price": 900, "affection_reward": 20, "order": 4},
+    {"code": "wine", "name": "🍷 Бутылка хорошего вина", "price": 1100, "affection_reward": 24, "order": 5},
+    {"code": "makeup_set", "name": "💄 Набор косметики", "price": 1200, "affection_reward": 26, "order": 6},
+    {"code": "sneakers", "name": "👟 Стильные кроссовки", "price": 1500, "affection_reward": 32, "order": 7},
+    {"code": "bag", "name": "👜 Стильная сумка", "price": 2500, "affection_reward": 55, "order": 8},
+    {"code": "watch", "name": "⌚ Наручные часы", "price": 4000, "affection_reward": 85, "order": 9},
+    {"code": "jewelry", "name": "💍 Ювелирное украшение", "price": 7000, "affection_reward": 150, "order": 10},
 ]
 
 
