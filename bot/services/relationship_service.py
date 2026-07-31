@@ -323,6 +323,12 @@ async def _advance_stage_if_needed(
 # ---------------------------------------------------------------------------
 
 
+async def set_offended(session: AsyncSession, relationship: Relationship, offended: bool) -> None:
+    """Устанавливает/снимает состояние обиды — блокирует /actions, пока не простят."""
+    relationship.is_offended = offended
+    await session.commit()
+
+
 async def can_marry(session: AsyncSession, relationship: Relationship) -> bool:
     marriage_stage = await _get_marriage_stage(session)
     if marriage_stage is None:
