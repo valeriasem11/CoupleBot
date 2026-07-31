@@ -1,6 +1,7 @@
 """
 Хендлеры системы отношений: предложение, действия пары, профиль пары, брак.
 """
+import random
 from datetime import datetime, timezone
 
 from aiogram import F, Router
@@ -40,10 +41,48 @@ from bot.services.relationship_service import (
     marry,
     perform_action,
     reject_proposal,
+    set_offended,
     format_timedelta,
 )
 
 router = Router(name="relationships")
+
+# Случайные комплименты — подставляются вместо стандартного лога для действия "compliment"
+COMPLIMENTS = [
+    "Ты невероятно красив(а) сегодня.",
+    "Рядом с тобой я чувствую себя счастливее.",
+    "У тебя самая тёплая улыбка на свете.",
+    "Ты умеешь поднять настроение одним словом.",
+    "С тобой никогда не бывает скучно.",
+    "Ты самый заботливый человек, которого я знаю.",
+    "Мне нравится, как ты смеёшься.",
+    "Ты вдохновляешь меня быть лучше.",
+    "У тебя потрясающее чувство юмора.",
+    "Твои глаза светятся, когда ты рассказываешь о том, что любишь.",
+    "Ты умеешь слушать, как никто другой.",
+    "Рядом с тобой любые проблемы кажутся решаемыми.",
+    "Ты невероятно талантлив(а).",
+    "Мне повезло, что ты у меня есть.",
+    "Ты делаешь мои дни ярче.",
+    "У тебя очень доброе сердце.",
+    "Ты всегда знаешь, что сказать в нужный момент.",
+    "Ты самый надёжный человек в моей жизни.",
+    "С тобой я чувствую себя в безопасности.",
+    "Ты умеешь удивлять меня каждый день.",
+    "Твоя энергия заразительна.",
+    "Ты выглядишь потрясающе, даже когда просто просыпаешься.",
+    "Мне нравится каждая мелочь в тебе.",
+    "Ты самый терпеливый человек, которого я встречал(а).",
+    "Ты умеешь превращать обычный день в особенный.",
+    "Я горжусь тобой.",
+    "Ты честный(ая) и настоящий(ая) — это редкость.",
+    "С тобой я чувствую себя понятым(ой).",
+    "Ты делаешь этот мир немного добрее.",
+    "Я благодарен(на) судьбе, что встретил(а) тебя.",
+]
+
+OFFEND_TRIGGERS = {"обиделась", "обиделся", "обидеться"}
+FORGIVE_TRIGGERS = {"простить", "прощаю"}
 
 
 async def _get_user(message_or_callback, session: AsyncSession):
@@ -187,6 +226,13 @@ async def cmd_actions(message: Message, session: AsyncSession):
         await message.answer("У тебя пока нет пары. Используй /propose, ответив на сообщение человека.")
         return
 
+    if relationship.is_offended:
+        await message.answer(
+            "😤 Партнёр обиделся(-ась) — сначала нужно помириться. "
+            "Ответьте на его/её сообщение словом «простить»."
+        )
+        return
+
     actions = await get_available_actions(session, relationship)
     partner = get_partner(relationship, user.id)
 
@@ -214,6 +260,13 @@ async def on_action_selected(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("У тебя больше нет активной пары.", show_alert=True)
         return
 
+    if relationship.is_offended:
+        await callback.answer(
+            "😤 Партнёр обиделся(-ась) — сначала помиритесь (ответом «простить»).",
+            show_alert=True,
+        )
+        return
+
     action = await get_action_by_code(session, action_code)
     if action is None or action.min_stage_order > relationship.stage.order:
         await callback.answer("Это действие сейчас недоступно.", show_alert=True)
@@ -232,7 +285,17 @@ async def on_action_selected(callback: CallbackQuery, session: AsyncSession):
     await session.refresh(relationship)
 
     partner = get_partner(relationship, user.id)
-    text = f"{action.emoji} | {_mention(user)} {action.log_verb} {_mention(partner)} (+{result.affection_gained} ❤️)"
+
+    if action.code == "compliment":
+        compliment = random.choice(COMPLIMENTS)
+        text = (
+            f"{action.emoji} | {_mention(user)} говорит {_mention(partner)}:\n"
+            f"«{compliment}»\n\n"
+            f"(+{result.affection_gained} ❤️)"
+        )
+    else:
+        text = f"{action.emoji} | {_mention(user)} {action.log_verb} {_mention(partner)} (+{result.affection_gained} ❤️)"
+
     if result.event_bonus_percent > 0:
         text += f"\n✨ Бонус общего события: +{result.event_bonus_percent}%"
 
@@ -463,3 +526,55 @@ async def on_breakup_cancel(callback: CallbackQuery, session: AsyncSession):
 
     await callback.message.edit_text("Отменено — вы остаётесь вместе 💕")
     await callback.answer()
+
+
+# ---------------------------------------------------------------------------
+# Обида / прощение — ответом на сообщение партнёра словом "обиделась"/"простить"
+# ---------------------------------------------------------------------------
+
+
+@router.message(F.reply_to_message, F.text.func(lambda t: bool(t) and t.strip().lower() in OFFEND_TRIGGERS))
+async def on_offend(message: Message, session: AsyncSession):
+    if message.reply_to_message.from_user is None:
+        return
+
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id)
+    if relationship is None:
+        return  # не в отношениях — просто не реагируем на слово
+
+    partner = get_partner(relationship, user.id)
+    if message.reply_to_message.from_user.id != partner.telegram_id:
+        return  # ответили не партнёру — не наше дело
+
+    if relationship.is_offended:
+        await message.answer("Пара уже и так в обиде 😤")
+        return
+
+    await set_offended(session, relationship, True)
+    await message.answer(
+        f"😤 {_mention(user)} обиделся(-ась) на {_mention(partner)}.\n"
+        f"Действия с партнёром (/actions) заблокированы, пока кто-то не ответит "
+        f"партнёру словом «простить»."
+    )
+
+
+@router.message(F.reply_to_message, F.text.func(lambda t: bool(t) and t.strip().lower() in FORGIVE_TRIGGERS))
+async def on_forgive(message: Message, session: AsyncSession):
+    if message.reply_to_message.from_user is None:
+        return
+
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id)
+    if relationship is None:
+        return
+
+    partner = get_partner(relationship, user.id)
+    if message.reply_to_message.from_user.id != partner.telegram_id:
+        return
+
+    if not relationship.is_offended:
+        return  # не в обиде — молча игнорируем, чтобы не мешать обычной переписке
+
+    await set_offended(session, relationship, False)
+    await message.answer(f"🤝 {_mention(user)} и {_mention(partner)} помирились! Можно снова пользоваться /actions.")
