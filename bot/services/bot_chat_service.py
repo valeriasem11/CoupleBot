@@ -8,7 +8,7 @@ from bot.database.models import BotChat
 
 
 async def upsert_chat(
-    session: AsyncSession, chat_id: int, chat_title: str | None, chat_type: str
+    session: AsyncSession, chat_id: int, chat_title: str | None, chat_type: str, member_status: str
 ) -> None:
     """Отмечает чат как активный (бот в нём есть) — создаёт запись или обновляет существующую."""
     result = await session.execute(select(BotChat).where(BotChat.chat_id == chat_id))
@@ -16,23 +16,48 @@ async def upsert_chat(
 
     if chat is None:
         session.add(
-            BotChat(chat_id=chat_id, chat_title=chat_title, chat_type=chat_type, is_active=True)
+            BotChat(
+                chat_id=chat_id,
+                chat_title=chat_title,
+                chat_type=chat_type,
+                member_status=member_status,
+                is_active=True,
+            )
         )
     else:
         chat.chat_title = chat_title
         chat.chat_type = chat_type
+        chat.member_status = member_status
         chat.is_active = True
 
     await session.commit()
 
 
-async def mark_chat_inactive(session: AsyncSession, chat_id: int) -> None:
+async def mark_chat_inactive(session: AsyncSession, chat_id: int, member_status: str) -> None:
     """Отмечает чат как неактивный (бота удалили/он вышел) — запись не удаляется."""
     result = await session.execute(select(BotChat).where(BotChat.chat_id == chat_id))
     chat = result.scalar_one_or_none()
     if chat is not None:
         chat.is_active = False
+        chat.member_status = member_status
         await session.commit()
+
+
+async def refresh_chat_title(session: AsyncSession, bot, chat: BotChat) -> None:
+    """
+    Если название чата неизвестно (например, восстановлено из старых данных
+    без названия) — пробует "дозапросить" его у Telegram через Bot API.
+    Молча ничего не делает, если это не получилось (бота могли уже удалить).
+    """
+    if chat.chat_title is not None:
+        return
+    try:
+        tg_chat = await bot.get_chat(chat.chat_id)
+        chat.chat_title = tg_chat.title or tg_chat.full_name or chat.chat_title
+        chat.chat_type = tg_chat.type
+        await session.commit()
+    except Exception:
+        pass  # бот мог быть удалён из чата, доступ пропал и т.п. — не критично
 
 
 async def get_all_chats(session: AsyncSession, active_only: bool = True) -> list[BotChat]:
