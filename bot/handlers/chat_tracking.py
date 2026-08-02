@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.services.bot_chat_service import (
     get_all_chats,
     mark_chat_inactive,
+    refresh_chat_status,
     refresh_chat_title,
     upsert_chat,
 )
@@ -77,19 +78,31 @@ async def cmd_chats(message: Message, session: AsyncSession):
         await message.answer("Бот пока не добавлен ни в один чат.")
         return
 
-    # Дозапрашиваем названия для чатов, которые их ещё не знают
+    # Дозапрашиваем названия и статус для чатов, у которых их ещё нет
+    # (делаем это ДО фильтрации по типу — иначе тип личных чатов так и
+    # останется "unknown" и они не смогут отсеяться на следующем шаге)
     for chat in chats:
         if chat.chat_title is None:
             await refresh_chat_title(session, message.bot, chat)
+        if chat.member_status == "unknown":
+            await refresh_chat_status(session, message.bot, chat)
 
-    lines = [f"📋 Чатов с ботом: {len(chats)}", ""]
-    for chat in chats:
+    # Показываем только настоящие групповые чаты — личные диалоги с ботом не в счёт
+    group_chats = [c for c in chats if c.chat_type in ("group", "supergroup")]
+
+    if not group_chats:
+        await message.answer("Бот пока не добавлен ни в один групповой чат.")
+        return
+
+    header = f"📋 Групповых чатов с ботом: {len(group_chats)}"
+    entries = []
+    for chat in group_chats:
         title = chat.chat_title or f"Чат {chat.chat_id}"
         status_label = STATUS_LABELS.get(chat.member_status, chat.member_status)
         updated = chat.updated_at.strftime("%d.%m.%Y %H:%M")
-        lines.append(
+        entries.append(
             f"✅ {title}\n"
             f"ID: <code>{chat.chat_id}</code> · статус: {status_label} · обновлено: {updated}"
         )
 
-    await message.answer("\n\n".join(lines))
+    await message.answer(header + "\n\n" + "\n\n".join(entries))
