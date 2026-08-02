@@ -7,7 +7,12 @@ from aiogram.filters import Command
 from aiogram.types import ChatMemberUpdated, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.services.bot_chat_service import get_all_chats, mark_chat_inactive, upsert_chat
+from bot.services.bot_chat_service import (
+    get_all_chats,
+    mark_chat_inactive,
+    refresh_chat_title,
+    upsert_chat,
+)
 
 router = Router(name="chat_tracking")
 
@@ -18,6 +23,15 @@ OWNER_TELEGRAM_ID = 828533150
 # Статусы участника чата, которые считаются "бот реально в чате"
 _ACTIVE_STATUSES = {"member", "administrator", "creator"}
 
+STATUS_LABELS = {
+    "member": "участник",
+    "administrator": "администратор",
+    "creator": "создатель",
+    "left": "вышел",
+    "kicked": "удалён",
+    "unknown": "неизвестно",
+}
+
 
 @router.my_chat_member()
 async def on_bot_membership_changed(event: ChatMemberUpdated, session: AsyncSession):
@@ -25,8 +39,11 @@ async def on_bot_membership_changed(event: ChatMemberUpdated, session: AsyncSess
     Срабатывает при любом изменении статуса бота в чате: добавили, удалили,
     выгнали, повысили до админа и т.д. Обновляет учёт чатов соответственно.
     """
-    was_active = event.old_chat_member.status in _ACTIVE_STATUSES
-    is_active = event.new_chat_member.status in _ACTIVE_STATUSES
+    old_status = event.old_chat_member.status
+    new_status = event.new_chat_member.status
+
+    was_active = old_status in _ACTIVE_STATUSES
+    is_active = new_status in _ACTIVE_STATUSES
 
     if is_active and not was_active:
         await upsert_chat(
@@ -34,9 +51,19 @@ async def on_bot_membership_changed(event: ChatMemberUpdated, session: AsyncSess
             chat_id=event.chat.id,
             chat_title=event.chat.title,
             chat_type=event.chat.type,
+            member_status=new_status,
         )
     elif was_active and not is_active:
-        await mark_chat_inactive(session, event.chat.id)
+        await mark_chat_inactive(session, event.chat.id, member_status=new_status)
+    elif is_active and was_active:
+        # например, повысили/понизили из админов — статус поменялся, но бот всё ещё в чате
+        await upsert_chat(
+            session,
+            chat_id=event.chat.id,
+            chat_title=event.chat.title,
+            chat_type=event.chat.type,
+            member_status=new_status,
+        )
 
 
 @router.message(Command("chats"))
@@ -50,9 +77,19 @@ async def cmd_chats(message: Message, session: AsyncSession):
         await message.answer("Бот пока не добавлен ни в один чат.")
         return
 
+    # Дозапрашиваем названия для чатов, которые их ещё не знают
+    for chat in chats:
+        if chat.chat_title is None:
+            await refresh_chat_title(session, message.bot, chat)
+
     lines = [f"📋 Чатов с ботом: {len(chats)}", ""]
     for chat in chats:
-        title = chat.chat_title or "(без названия)"
-        lines.append(f"• {title} — {chat.chat_id} ({chat.chat_type})")
+        title = chat.chat_title or f"Чат {chat.chat_id}"
+        status_label = STATUS_LABELS.get(chat.member_status, chat.member_status)
+        updated = chat.updated_at.strftime("%d.%m.%Y %H:%M")
+        lines.append(
+            f"✅ {title}\n"
+            f"ID: <code>{chat.chat_id}</code> · статус: {status_label} · обновлено: {updated}"
+        )
 
-    await message.answer("\n".join(lines))
+    await message.answer("\n\n".join(lines))
