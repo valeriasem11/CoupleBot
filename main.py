@@ -14,9 +14,12 @@ from aiogram.types import BotCommand
 
 from bot.config import config
 from bot.database.seed import main as seed_database
+from bot.database.engine import async_session_maker
+from bot.services.bot_chat_service import backfill_known_chats
 from bot.handlers import (
     achievements,
     casino,
+    chat_tracking,
     child_actions,
     children,
     economy,
@@ -105,6 +108,9 @@ async def main():
     await seed_database()
     logger.info("Справочники готовы.")
 
+    async with async_session_maker() as session:
+        await backfill_known_chats(session)
+
     bot = Bot(
         token=config.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
@@ -131,6 +137,7 @@ async def main():
     dp.include_router(travel.router)
     dp.include_router(stats.router)
     dp.include_router(gift.router)
+    dp.include_router(chat_tracking.router)
 
     # На всякий случай сбрасываем накопленные апдейты перед стартом polling
     await bot.delete_webhook(drop_pending_updates=True)
