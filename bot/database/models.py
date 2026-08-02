@@ -312,6 +312,26 @@ class ChildAction(Base):
     bonus_trait: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
 
+class BotChat(Base):
+    """
+    Чаты, в которые добавлен бот. Обновляется автоматически при добавлении/
+    удалении бота (см. handlers/chat_tracking.py). Нужно только для
+    служебной команды /chats, доступной владельцу бота.
+    """
+
+    __tablename__ = "bot_chats"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    chat_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    chat_type: Mapped[str] = mapped_column(String(50))
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # False, если бота удалили/он вышел — запись не удаляем, просто помечаем неактивной
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class UserAchievement(Base):
     """Разблокированные достижения пользователя. Уникальность — по (user_id, code)."""
 
