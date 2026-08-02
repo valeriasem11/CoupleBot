@@ -60,6 +60,22 @@ async def refresh_chat_title(session: AsyncSession, bot, chat: BotChat) -> None:
         pass  # бот мог быть удалён из чата, доступ пропал и т.п. — не критично
 
 
+async def refresh_chat_status(session: AsyncSession, bot, chat: BotChat) -> None:
+    """
+    Если статус бота в чате неизвестен (запись пришла из "довосстановления"
+    старых данных, а не от живого события смены статуса) — дозапрашивает
+    его напрямую у Telegram.
+    """
+    if chat.member_status != "unknown":
+        return
+    try:
+        member = await bot.get_chat_member(chat.chat_id, bot.id)
+        chat.member_status = member.status
+        await session.commit()
+    except Exception:
+        pass  # бот мог быть удалён из чата, доступ пропал и т.п. — не критично
+
+
 async def get_all_chats(session: AsyncSession, active_only: bool = True) -> list[BotChat]:
     query = select(BotChat).order_by(BotChat.added_at.desc())
     if active_only:
