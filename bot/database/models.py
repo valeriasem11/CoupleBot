@@ -325,8 +325,13 @@ class BotChat(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     chat_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     chat_type: Mapped[str] = mapped_column(String(50))
+    # последний известный статус бота в чате: member/administrator/creator/left/kicked
+    member_status: Mapped[str] = mapped_column(String(20), default="unknown")
     added_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     # False, если бота удалили/он вышел — запись не удаляем, просто помечаем неактивной
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
