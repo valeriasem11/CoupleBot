@@ -392,6 +392,9 @@ class Child(Base):
     # вместо родов на планировщике произойдёт выкидыш
     will_miscarry: Mapped[bool] = mapped_column(Boolean, default=False)
     born_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ребёнок отдан в детский сад — не требует действий, настроение угасает
+    # медленнее, но иногда случаются случайные события (см. KINDERGARTEN_EVENTS)
+    is_in_kindergarten: Mapped[bool] = mapped_column(Boolean, default=False)
 
     relationship_: Mapped["Relationship"] = relationship(lazy="joined")
 
