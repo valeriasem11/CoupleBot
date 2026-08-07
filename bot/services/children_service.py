@@ -31,6 +31,8 @@ DAYS_PER_AGE_STAGE = 7
 # Угасание настроения без внимания
 MOOD_DECAY_AMOUNT = 5
 MOOD_DECAY_INTERVAL = timedelta(hours=6)
+# В детском саду угасание вдвое медленнее — ребёнку не нужны действия родителей
+KINDERGARTEN_MOOD_DECAY_INTERVAL = timedelta(hours=12)
 # Суммарное снижение угасания от игрушек не может превысить это значение —
 # чтобы угасание никогда не обнулялось полностью
 MAX_TOY_DECAY_REDUCTION = 0.7
@@ -48,6 +50,81 @@ EVENT_PRAISE_AFFECTION = 3
 EVENT_GIFT_COST = 50
 EVENT_GIFT_AFFECTION = 8
 EVENT_GIFT_MOOD = 10
+
+# ---------------------------------------------------------------------------
+# Детский сад
+# ---------------------------------------------------------------------------
+
+# ~раз в 1-1.5 дня на ребёнка, пока он в саду (планировщик тикает каждые 5 минут)
+KINDERGARTEN_EVENT_CHANCE_PER_TICK = 0.003
+
+KINDERGARTEN_MOOD_LOSS = 8
+KINDERGARTEN_MONEY_GAIN_RANGE = (20, 60)
+KINDERGARTEN_FINE_RANGE = (30, 80)
+KINDERGARTEN_CUTE_AFFECTION = 5
+
+# outcome: "mood_loss" | "money_gain" | "fine" | "cute"
+KINDERGARTEN_EVENTS = [
+    {
+        "text": "🥊 «Бой за песочницу»: {name} не поделил(а) лопатку с другим ребёнком и получил(а) по рукам.",
+        "outcome": "mood_loss",
+    },
+    {
+        "text": "👑 «Главный хулиган»: {name} отобрал(а) любимую машинку у другого ребёнка и объявил(а) себя королём горки!",
+        "outcome": "money_gain",
+    },
+    {
+        "text": (
+            "🧱 «Разборка из-за кубиков»: дети не поделили лего — построили башню, разрушили её "
+            "и вместе получили замечание от воспитателя."
+        ),
+        "outcome": "mood_loss",
+    },
+    {
+        "text": (
+            "😬 «Укус года»: {name} цапнул(а) за палец воспитателя, который пытался забрать "
+            "тихий час. Родителей вызывают в садик на разговор."
+        ),
+        "outcome": "fine",
+    },
+    {
+        "text": (
+            "🥣 «Манная каша с комочками»: {name} устроил(а) бунт, отказался(-ась) есть кашу "
+            "и размазал(а) её по лицу соседа."
+        ),
+        "outcome": "mood_loss",
+    },
+    {
+        "text": "🥕 «Секретный обмен»: {name} успешно выменял(а) нелюбимую варёную морковку на вкусную печеньку.",
+        "outcome": "money_gain",
+    },
+    {
+        "text": (
+            "🎉 «Ночной клуб в 14:00»: пока все спали, {name} подговорил(а) всю группу "
+            "петь песни и устраивать гонки на подушках."
+        ),
+        "outcome": "cute",
+    },
+    {
+        "text": "🎨 «Шедевр на стене»: {name} нарисовал(а) портрет родителей зелёным фломастером на свежих обоях садика.",
+        "outcome": "fine",
+    },
+    {
+        "text": "🍬 «Прилипчивая жвачка»: {name} где-то нашёл(нашла) жвачку и вклеил(а) её себе в волосы.",
+        "outcome": "mood_loss",
+    },
+    {
+        "text": "💛 «Первая любовь»: на прогулке {name} подарил(а) красивый камушек другому ребёнку.",
+        "outcome": "cute",
+    },
+    {
+        "text": (
+            "💰 «Кладоискатель»: {name} нашёл(нашла) на площадке блестящую крышку от газировки "
+            "и гордо принёс(принесла) домой в кармане."
+        ),
+        "outcome": "money_gain",
+    },
+]
 
 # Пул черт характера: (код, отображаемое название с эмодзи)
 TRAIT_POOL = [
@@ -322,6 +399,29 @@ class RandomEvent:
     text: str
 
 
+def _apply_kindergarten_outcome(child: Child, relationship: Relationship, outcome: str) -> str:
+    """Применяет последствие события сада и возвращает текст для сообщения."""
+    if outcome == "mood_loss":
+        child.mood = max(0, child.mood - KINDERGARTEN_MOOD_LOSS)
+        return f"😔 Настроение упало на {KINDERGARTEN_MOOD_LOSS}% (теперь {child.mood}%)"
+
+    if outcome == "money_gain":
+        amount = random.randint(*KINDERGARTEN_MONEY_GAIN_RANGE)
+        relationship.family_budget += amount
+        return f"💰 В семейный бюджет: +{amount} 🪙"
+
+    if outcome == "fine":
+        amount = random.randint(*KINDERGARTEN_FINE_RANGE)
+        relationship.family_budget = max(0, relationship.family_budget - amount)
+        return f"💸 Пришлось заплатить: -{amount} 🪙 из семейного бюджета"
+
+    if outcome == "cute":
+        relationship.affection_points += KINDERGARTEN_CUTE_AFFECTION
+        return f"💕 Родители умилились: +{KINDERGARTEN_CUTE_AFFECTION} ❤️ близости"
+
+    return ""
+
+
 def _compute_target_age_stage(born_at: datetime, now: datetime) -> AgeStage:
     if born_at.tzinfo is None:
         born_at = born_at.replace(tzinfo=timezone.utc)
@@ -378,20 +478,23 @@ async def process_children_tick(
                     )
                 )
 
-        # 2. Угасание настроения (игрушки снижают скорость угасания)
+        # 2. Угасание настроения (игрушки снижают скорость угасания; в саду — вдвое медленнее)
         last_decay = child.last_mood_decay_at or child.born_at
         if last_decay.tzinfo is None:
             last_decay = last_decay.replace(tzinfo=timezone.utc)
 
+        decay_interval = (
+            KINDERGARTEN_MOOD_DECAY_INTERVAL if child.is_in_kindergarten else MOOD_DECAY_INTERVAL
+        )
         elapsed = now - last_decay
-        periods = int(elapsed.total_seconds() // MOOD_DECAY_INTERVAL.total_seconds())
+        periods = int(elapsed.total_seconds() // decay_interval.total_seconds())
 
         if periods >= 1:
             reduction = _toy_decay_reduction(child.owned_toys, toy_reduction_map)
             amount_per_period = max(1, round(MOOD_DECAY_AMOUNT * (1 - reduction)))
 
             child.mood = max(0, child.mood - amount_per_period * periods)
-            child.last_mood_decay_at = last_decay + periods * MOOD_DECAY_INTERVAL
+            child.last_mood_decay_at = last_decay + periods * decay_interval
 
             if child.mood <= 0:
                 if relationship.chat_id is not None:
@@ -402,14 +505,62 @@ async def process_children_tick(
                 removed = True
 
         # 3. Случайное событие (не для тех, кого только что забрали)
-        if not removed and relationship.chat_id is not None and random.random() < RANDOM_EVENT_CHANCE_PER_TICK:
-            text = random.choice(RANDOM_EVENT_TEXTS).format(name=display_name)
-            random_events.append(
-                RandomEvent(chat_id=relationship.chat_id, child_id=child.id, text=text)
-            )
+        # Дома — обычные милые события. В саду — отдельный набор с последствиями
+        # (деньги/настроение/близость), т.к. родителей рядом нет.
+        if not removed and relationship.chat_id is not None:
+            if child.is_in_kindergarten:
+                if random.random() < KINDERGARTEN_EVENT_CHANCE_PER_TICK:
+                    event_def = random.choice(KINDERGARTEN_EVENTS)
+                    event_text = event_def["text"].format(name=display_name)
+                    result_text = _apply_kindergarten_outcome(child, relationship, event_def["outcome"])
+                    mentions = " и ".join(
+                        f"@{u.username}" if u.username else u.first_name
+                        for u in (relationship.user1, relationship.user2)
+                    )
+                    text = (
+                        f"🔔 Новости из детского сада! ({mentions})\n\n"
+                        f"{event_text}\n\n"
+                        f"Результат: {result_text}"
+                    )
+                    random_events.append(
+                        RandomEvent(chat_id=relationship.chat_id, child_id=child.id, text=text)
+                    )
+            elif random.random() < RANDOM_EVENT_CHANCE_PER_TICK:
+                text = random.choice(RANDOM_EVENT_TEXTS).format(name=display_name)
+                random_events.append(
+                    RandomEvent(chat_id=relationship.chat_id, child_id=child.id, text=text)
+                )
 
     await session.commit()
     return growth_events, removal_events, random_events
+
+
+# ---------------------------------------------------------------------------
+# Детский сад
+# ---------------------------------------------------------------------------
+
+
+async def send_to_kindergarten(session: AsyncSession, child: Child) -> None:
+    if child.is_in_kindergarten:
+        raise ChildError(f"{child.name or 'Ребёнок'} уже в детском саду.")
+    child.is_in_kindergarten = True
+    await session.commit()
+
+
+async def pickup_from_kindergarten(session: AsyncSession, child: Child) -> None:
+    if not child.is_in_kindergarten:
+        raise ChildError(f"{child.name or 'Ребёнок'} и так дома, не в саду.")
+    child.is_in_kindergarten = False
+    await session.commit()
+
+
+def ensure_not_in_kindergarten(child: Child) -> None:
+    """Действия с ребёнком недоступны, пока он в детском саду — заберите его командой /kindergarten."""
+    if child.is_in_kindergarten:
+        raise ChildError(
+            f"{child.name or 'Ребёнок'} сейчас в детском саду — там ничего делать не нужно. "
+            f"Заберите его(её) через /kindergarten, если хотите позаниматься."
+        )
 
 
 # ---------------------------------------------------------------------------
