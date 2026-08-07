@@ -3,9 +3,9 @@
 """
 from datetime import datetime, timezone
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import get_or_create_user
@@ -17,10 +17,13 @@ from bot.services.children_service import (
     ensure_can_try_conceive,
     format_timedelta,
     get_active_children_count,
+    get_child_by_id,
     get_children,
     get_conception_cooldown_remaining,
     mood_label,
     name_child,
+    pickup_from_kindergarten,
+    send_to_kindergarten,
     set_protection,
     trait_codes_to_labels,
     toy_codes_to_labels,
@@ -29,6 +32,8 @@ from bot.services.children_service import (
 from bot.services.relationship_service import get_active_relationship
 
 router = Router(name="children")
+
+KINDERGARTEN_TOGGLE_PREFIX = "kindergarten_toggle:"
 
 
 async def _get_user(message, session: AsyncSession):
@@ -213,3 +218,85 @@ async def cmd_end_pregnancy(message: Message, session: AsyncSession):
         "Беременность прервана по вашему решению.\n"
         "Следующая попытка зачатия будет доступна через 12 часов."
     )
+
+
+# ---------------------------------------------------------------------------
+# /kindergarten — отдать ребёнка в детский сад / забрать домой
+# ---------------------------------------------------------------------------
+
+
+def _build_kindergarten_keyboard(children_list: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for child in children_list:
+        label = child.name or "Без имени"
+        text = f"🏠 Забрать {label} домой" if child.is_in_kindergarten else f"🏫 Отправить {label} в сад"
+        buttons.append(
+            [InlineKeyboardButton(text=text, callback_data=f"{KINDERGARTEN_TOGGLE_PREFIX}{child.id}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+@router.message(Command("kindergarten"))
+async def cmd_kindergarten(message: Message, session: AsyncSession):
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id)
+
+    if relationship is None:
+        await message.answer("У тебя пока нет пары.")
+        return
+
+    all_children = await get_children(session, relationship.id)
+    alive_children = [c for c in all_children if c.status == ChildStatus.ALIVE]
+
+    if not alive_children:
+        await message.answer("У вашей пары пока нет детей.")
+        return
+
+    lines = ["🏫 Детский сад", ""]
+    for child in alive_children:
+        label = child.name or "Без имени"
+        status = "в саду 🏫 (действия недоступны, настроение угасает медленнее)" if child.is_in_kindergarten else "дома 🏠"
+        lines.append(f"{label} — {status}")
+
+    await message.answer(
+        "\n".join(lines), reply_markup=_build_kindergarten_keyboard(alive_children)
+    )
+
+
+@router.callback_query(F.data.startswith(KINDERGARTEN_TOGGLE_PREFIX))
+async def on_kindergarten_toggle(callback: CallbackQuery, session: AsyncSession):
+    child_id = int(callback.data.removeprefix(KINDERGARTEN_TOGGLE_PREFIX))
+    child = await get_child_by_id(session, child_id)
+
+    if child is None or child.status != ChildStatus.ALIVE:
+        await callback.answer("Этот ребёнок недоступен.", show_alert=True)
+        return
+
+    user = await get_or_create_user(
+        session=session,
+        telegram_id=callback.from_user.id,
+        username=callback.from_user.username,
+        first_name=callback.from_user.first_name,
+        chat_id=callback.message.chat.id,
+    )
+    relationship = await get_active_relationship(session, user.id)
+    if relationship is None or child.relationship_id != relationship.id:
+        await callback.answer("Это не ваш ребёнок.", show_alert=True)
+        return
+
+    label = child.name or "Без имени"
+    try:
+        if child.is_in_kindergarten:
+            await pickup_from_kindergarten(session, child)
+            await callback.message.edit_text(f"🏠 {label} забран(а) из детского сада домой.")
+        else:
+            await send_to_kindergarten(session, child)
+            await callback.message.edit_text(
+                f"🏫 {label} отправлен(а) в детский сад.\n"
+                f"Действия с ним(ней) недоступны, пока он(а) там, но и настроение будет угасать медленнее."
+            )
+    except ChildError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+
+    await callback.answer()

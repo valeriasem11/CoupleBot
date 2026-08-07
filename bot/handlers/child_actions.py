@@ -19,6 +19,7 @@ from bot.keyboards.children import (
 )
 from bot.services.children_service import (
     ChildError,
+    ensure_not_in_kindergarten,
     format_timedelta,
     get_available_child_actions,
     get_child_action_by_code,
@@ -48,8 +49,20 @@ async def _get_user(message_or_callback, session: AsyncSession):
 
 
 async def _send_actions_for_child(target, child, session: AsyncSession, edit: bool):
-    actions = await get_available_child_actions(session, child)
     label = child.name or "Без имени"
+
+    if child.is_in_kindergarten:
+        text = (
+            f"🏫 {label} сейчас в детском саду — там ничего делать не нужно.\n"
+            f"Заберите его(её) домой командой /kindergarten, если хотите позаниматься."
+        )
+        if edit:
+            await target.message.edit_text(text)
+        else:
+            await target.answer(text)
+        return
+
+    actions = await get_available_child_actions(session, child)
 
     cooldown_line = ""
     remaining = get_child_action_cooldown_remaining(child)
@@ -140,6 +153,12 @@ async def on_child_action(callback: CallbackQuery, session: AsyncSession):
     relationship = await get_active_relationship(session, user.id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
+        return
+
+    try:
+        ensure_not_in_kindergarten(child)
+    except ChildError as e:
+        await callback.answer(str(e), show_alert=True)
         return
 
     action = await get_child_action_by_code(session, action_code)
