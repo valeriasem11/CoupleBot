@@ -66,6 +66,7 @@ BOT_COMMANDS = [
     BotCommand(command="name_child", description="Дать имя новорождённому"),
     BotCommand(command="children", description="Список детей и их карточки"),
     BotCommand(command="child_actions", description="Взаимодействовать с ребёнком"),
+    BotCommand(command="kindergarten", description="Отдать ребёнка в сад / забрать домой"),
     BotCommand(command="top", description="Рейтинг пар в этой беседе"),
     BotCommand(command="surprise", description="Отправить анонимный сюрприз партнёру"),
     BotCommand(command="travel", description="Отправиться в путешествие (в браке)"),
