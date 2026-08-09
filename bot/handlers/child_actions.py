@@ -86,7 +86,7 @@ async def _send_actions_for_child(target, child, session: AsyncSession, edit: bo
 @router.message(Command("child_actions"))
 async def cmd_child_actions(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -129,7 +129,7 @@ async def on_pick_child(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
         return
@@ -150,7 +150,7 @@ async def on_child_action(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
         return
@@ -204,7 +204,7 @@ async def on_event_praise(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
         return
@@ -223,7 +223,7 @@ async def on_event_gift(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
         return

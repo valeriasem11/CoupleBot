@@ -49,7 +49,7 @@ async def _get_user(message, session: AsyncSession):
 @router.message(Command("have_child"))
 async def cmd_have_child(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -94,7 +94,7 @@ async def cmd_name_child(message: Message, command: CommandObject, session: Asyn
         return
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -113,7 +113,7 @@ async def cmd_name_child(message: Message, command: CommandObject, session: Asyn
 @router.message(Command("children"))
 async def cmd_children(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -182,7 +182,7 @@ async def cmd_protection(message: Message, command: CommandObject, session: Asyn
     enabled = arg in ("on", "вкл")
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
         return
@@ -203,7 +203,7 @@ async def cmd_protection(message: Message, command: CommandObject, session: Asyn
 @router.message(Command("end_pregnancy"))
 async def cmd_end_pregnancy(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
         return
@@ -239,7 +239,7 @@ def _build_kindergarten_keyboard(children_list: list) -> InlineKeyboardMarkup:
 @router.message(Command("kindergarten"))
 async def cmd_kindergarten(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -279,7 +279,7 @@ async def on_kindergarten_toggle(callback: CallbackQuery, session: AsyncSession)
         first_name=callback.from_user.first_name,
         chat_id=callback.message.chat.id,
     )
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
         return

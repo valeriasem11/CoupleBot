@@ -78,7 +78,7 @@ def _parse_amount(command: CommandObject) -> int | None:
 @router.message(Command("budget"))
 async def cmd_budget(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -104,7 +104,7 @@ async def cmd_deposit(message: Message, command: CommandObject, session: AsyncSe
         return
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -130,7 +130,7 @@ async def cmd_withdraw(message: Message, command: CommandObject, session: AsyncS
         return
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -156,7 +156,7 @@ async def cmd_withdraw(message: Message, command: CommandObject, session: AsyncS
 @router.message(Command("shop"))
 async def cmd_shop(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -176,7 +176,7 @@ async def cmd_shop(message: Message, session: AsyncSession):
 @router.callback_query(F.data == SHOP_MENU_PREFIX)
 async def on_shop_menu_back(callback: CallbackQuery, session: AsyncSession):
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     budget = relationship.family_budget if relationship else 0
 
     await callback.message.edit_text(
@@ -190,7 +190,7 @@ async def on_shop_menu_back(callback: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data == SHOP_TOYS_PREFIX)
 async def on_shop_toys(callback: CallbackQuery, session: AsyncSession):
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None or relationship.status.value != "married":
         await callback.answer("Магазин игрушек доступен только в браке.", show_alert=True)
@@ -218,7 +218,7 @@ async def on_shop_toys(callback: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data == SHOP_HOUSES_PREFIX)
 async def on_shop_houses(callback: CallbackQuery, session: AsyncSession):
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     houses = await get_all_houses(session)
     current_house_id = relationship.house_id if relationship else None
     await callback.message.edit_text(
@@ -231,7 +231,7 @@ async def on_shop_houses(callback: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data == SHOP_CARS_PREFIX)
 async def on_shop_cars(callback: CallbackQuery, session: AsyncSession):
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     cars = await get_all_cars(session)
     current_car_id = relationship.car_id if relationship else None
     await callback.message.edit_text(
@@ -250,7 +250,7 @@ async def on_buy_house(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await callback.answer("У тебя больше нет пары.", show_alert=True)
         return
@@ -288,7 +288,7 @@ async def on_buy_car(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await callback.answer("У тебя больше нет пары.", show_alert=True)
         return

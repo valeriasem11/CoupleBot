@@ -43,7 +43,7 @@ def _mention(user) -> str:
 @router.message(Command("gift"))
 async def cmd_gift(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -73,7 +73,7 @@ async def on_gift_buy(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await callback.answer("У тебя больше нет пары.", show_alert=True)
         return

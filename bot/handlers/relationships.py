@@ -141,7 +141,7 @@ async def cmd_propose(message: Message, session: AsyncSession):
     )
 
     try:
-        relationship = await create_proposal(session, proposer, target)
+        relationship = await create_proposal(session, proposer, target, message.chat.id)
     except RelationshipError as e:
         await message.answer(str(e))
         return
@@ -220,7 +220,7 @@ async def on_proposal_reject(callback: CallbackQuery, session: AsyncSession):
 @router.message(Command("actions"))
 async def cmd_actions(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары. Используй /propose, ответив на сообщение человека.")
@@ -254,7 +254,7 @@ async def cmd_actions(message: Message, session: AsyncSession):
 async def on_action_selected(callback: CallbackQuery, session: AsyncSession):
     action_code = callback.data.removeprefix(ACTION_PREFIX)
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await callback.answer("У тебя больше нет активной пары.", show_alert=True)
@@ -323,7 +323,7 @@ async def on_action_selected(callback: CallbackQuery, session: AsyncSession):
 @router.message(Command("couple"))
 async def cmd_couple(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -376,7 +376,7 @@ async def cmd_couple(message: Message, session: AsyncSession):
 @router.message(Command("marry"))
 async def cmd_marry(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -450,7 +450,7 @@ async def on_marry_reject(callback: CallbackQuery, session: AsyncSession):
 @router.message(Command("breakup"))
 async def cmd_breakup(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -539,7 +539,7 @@ async def on_offend(message: Message, session: AsyncSession):
         return
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         return  # не в отношениях — просто не реагируем на слово
 
@@ -565,7 +565,7 @@ async def on_forgive(message: Message, session: AsyncSession):
         return
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         return
 

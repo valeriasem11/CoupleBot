@@ -52,7 +52,7 @@ async def cmd_surprise(message: Message, command: CommandObject, session: AsyncS
         return
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
         return

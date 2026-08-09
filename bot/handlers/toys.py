@@ -66,7 +66,7 @@ async def on_pick_child_for_toy(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
         return
@@ -87,7 +87,7 @@ async def on_buy_toy(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None or child.relationship_id != relationship.id:
         await callback.answer("Это не ваш ребёнок.", show_alert=True)
         return

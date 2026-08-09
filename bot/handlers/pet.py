@@ -54,7 +54,7 @@ def _mention(user) -> str:
 @router.message(Command("petshop"))
 async def cmd_petshop(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
@@ -83,7 +83,7 @@ async def on_pet_buy(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await callback.answer("У тебя больше нет пары.", show_alert=True)
         return
@@ -121,7 +121,7 @@ async def cmd_name_pet(message: Message, command: CommandObject, session: AsyncS
         return
 
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
         return
@@ -138,7 +138,7 @@ async def cmd_name_pet(message: Message, command: CommandObject, session: AsyncS
 @router.message(Command("pet"))
 async def cmd_pet(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
         return
@@ -157,7 +157,7 @@ async def cmd_pet(message: Message, session: AsyncSession):
 @router.message(Command("pet_actions"))
 async def cmd_pet_actions(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await message.answer("У тебя пока нет пары.")
         return
@@ -184,7 +184,7 @@ async def on_pet_action(callback: CallbackQuery, session: AsyncSession):
     action_code = callback.data.removeprefix(PET_ACTION_PREFIX)
 
     user = await _get_user(callback, session)
-    relationship = await get_active_relationship(session, user.id)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
     if relationship is None:
         await callback.answer("У тебя больше нет пары.", show_alert=True)
         return
