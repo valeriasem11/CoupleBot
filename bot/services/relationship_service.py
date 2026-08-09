@@ -29,12 +29,21 @@ class RelationshipError(Exception):
 # ---------------------------------------------------------------------------
 
 
-async def get_active_relationship(session: AsyncSession, user_id: int) -> Relationship | None:
-    """Текущая активная (ACTIVE или MARRIED) пара пользователя, если есть."""
+async def get_active_relationship(
+    session: AsyncSession, user_id: int, chat_id: int
+) -> Relationship | None:
+    """
+    Текущая активная (ACTIVE или MARRIED) пара пользователя В ЭТОМ КОНКРЕТНОМ ЧАТЕ.
+
+    Один и тот же человек может одновременно состоять в разных отношениях
+    в разных беседах — ограничение "не больше одних отношений" действует
+    только в пределах одного чата, не глобально по всему боту.
+    """
     result = await session.execute(
         select(Relationship).where(
             or_(Relationship.user1_id == user_id, Relationship.user2_id == user_id),
             Relationship.status.in_([RelationshipStatus.ACTIVE, RelationshipStatus.MARRIED]),
+            Relationship.chat_id == chat_id,
         )
     )
     return result.scalars().first()
@@ -68,15 +77,20 @@ async def count_past_breakups(session: AsyncSession, user_id: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def create_proposal(session: AsyncSession, proposer: User, target: User) -> Relationship:
+async def create_proposal(
+    session: AsyncSession, proposer: User, target: User, chat_id: int
+) -> Relationship:
     if proposer.id == target.id:
         raise RelationshipError("Нельзя предложить отношения самой(ому) себе 🙂")
 
-    if await get_active_relationship(session, proposer.id) is not None:
-        raise RelationshipError("У тебя уже есть партнёр — сначала нужно расстаться, чтобы начать новые отношения.")
+    if await get_active_relationship(session, proposer.id, chat_id) is not None:
+        raise RelationshipError(
+            "У тебя уже есть партнёр в этой беседе — сначала нужно расстаться, "
+            "чтобы начать новые отношения здесь."
+        )
 
-    if await get_active_relationship(session, target.id) is not None:
-        raise RelationshipError("У этого человека уже есть партнёр.")
+    if await get_active_relationship(session, target.id, chat_id) is not None:
+        raise RelationshipError("У этого человека уже есть партнёр в этой беседе.")
 
     result = await session.execute(
         select(Relationship).where(
@@ -85,15 +99,19 @@ async def create_proposal(session: AsyncSession, proposer: User, target: User) -
                 and_(Relationship.user1_id == target.id, Relationship.user2_id == proposer.id),
             ),
             Relationship.status == RelationshipStatus.PENDING,
+            Relationship.chat_id == chat_id,
         )
     )
     if result.scalars().first() is not None:
-        raise RelationshipError("Предложение уже отправлено и ожидает ответа.")
+        raise RelationshipError("Предложение уже отправлено и ожидает ответа в этой беседе.")
 
     relationship = Relationship(
         user1_id=proposer.id,
         user2_id=target.id,
         status=RelationshipStatus.PENDING,
+        chat_id=chat_id,  # сохраняем сразу, а не только при принятии — иначе
+                          # проверки выше не смогут понять, к какому чату
+                          # относится ещё не подтверждённое предложение
     )
     session.add(relationship)
     await session.commit()

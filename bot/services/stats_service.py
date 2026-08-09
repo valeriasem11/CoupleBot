@@ -33,7 +33,7 @@ async def get_user_stats(session: AsyncSession, user: User) -> UserStats:
 
     unlocked_codes = await get_unlocked_codes(session, user.id)
     past_breakups = await count_past_breakups(session, user.id)
-    current_relationship = await get_active_relationship(session, user.id)
+    current_relationship = await get_active_relationship(session, user.id, user.chat_id)
 
     return UserStats(
         days_since_registration=days_since_registration,
