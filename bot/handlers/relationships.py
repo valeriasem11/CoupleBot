@@ -337,13 +337,13 @@ async def cmd_couple(message: Message, session: AsyncSession):
     stage_emoji, stage_text = relationship.stage.name.split(" ", 1)
 
     lines = [
-        f"💞 Профиль пары",
-        f"{_mention(relationship.user1)} и {_mention(relationship.user2)}",
-        "",
-        f"{stage_emoji} Стадия: {stage_text}",
-        f"❤️ Близость: {relationship.affection_points}",
-        "",
-        f"📅 Вместе: {days_together} дн.",
+    f"💑 Профиль пары",
+    f"{_mention(relationship.user1)} и {_mention(relationship.user2)}",
+    "",
+    f"{stage_emoji} Стадия: {stage_text}",
+    f"📈 Близость: {relationship.affection_points}",
+    "",
+    f"📅 Вместе: {days_together} дн.",
     ]
 
     if relationship.married_at:
