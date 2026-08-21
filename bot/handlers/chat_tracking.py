@@ -24,15 +24,6 @@ OWNER_TELEGRAM_ID = 828533150
 # Статусы участника чата, которые считаются "бот реально в чате"
 _ACTIVE_STATUSES = {"member", "administrator", "creator"}
 
-STATUS_LABELS = {
-    "member": "участник",
-    "administrator": "администратор",
-    "creator": "создатель",
-    "left": "вышел",
-    "kicked": "удалён",
-    "unknown": "неизвестно",
-}
-
 
 @router.my_chat_member()
 async def on_bot_membership_changed(event: ChatMemberUpdated, session: AsyncSession):
@@ -94,15 +85,19 @@ async def cmd_chats(message: Message, session: AsyncSession):
         await message.answer("Бот пока не добавлен ни в один групповой чат.")
         return
 
-    header = f"📋 Групповых чатов с ботом: {len(group_chats)}"
+    header = f"🤖 Беседы, где известен бот ({len(group_chats)})"
     entries = []
     for chat in group_chats:
         title = chat.chat_title or f"Чат {chat.chat_id}"
-        status_label = STATUS_LABELS.get(chat.member_status, chat.member_status)
         updated = chat.updated_at.strftime("%d.%m.%Y %H:%M")
         entries.append(
             f"✅ {title}\n"
-            f"ID: <code>{chat.chat_id}</code> · статус: {status_label} · обновлено: {updated}"
+            f"ID: <code>{chat.chat_id}</code> · статус: {chat.member_status} · обновлено: {updated}"
         )
 
-    await message.answer(header + "\n\n" + "\n\n".join(entries))
+    await message.answer(header + "\n\n" + "\n".join(entries))
+
+    # Один-единственный commit в самом конце — после того, как все атрибуты
+    # уже прочитаны и превращены в текст, "затирание" (expire) объектов
+    # после commit() больше не может ничему помешать.
+    await session.commit()
