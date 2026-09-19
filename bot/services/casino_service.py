@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import User
+from bot.services.happy_hour_service import get_active_happy_hour_bonus_percent
 
 MIN_BET = 100
 COOLDOWN_SECONDS = 5 * 60  # 5 минут между ставками
@@ -69,15 +70,27 @@ class CasinoResult:
     payout: int
     net: int  # payout - bet (может быть отрицательным при проигрыше)
     new_balance: int
+    happy_hour_bonus_percent: int  # 0, если счастливый час сейчас не идёт
 
 
-async def place_bet(session: AsyncSession, user: User, bet: int, dice_value: int) -> CasinoResult:
+async def place_bet(
+    session: AsyncSession, user: User, bet: int, dice_value: int, chat_id: int | None = None
+) -> CasinoResult:
     """
-    Проводит ставку: списывает bet, начисляет выигрыш при удаче, обновляет
-    кулдаун. Вызывающий код должен ЗАРАНЕЕ проверить validate_bet и кулдаун —
-    эта функция сама их не проверяет (bet и dice_value уже считаются валидными).
+    Проводит ставку: списывает bet, начисляет выигрыш при удаче (увеличенный,
+    если сейчас идёт счастливый час), обновляет кулдаун. Вызывающий код
+    должен ЗАРАНЕЕ проверить validate_bet и кулдаун — эта функция сама их
+    не проверяет (bet и dice_value уже считаются валидными).
+
+    chat_id — необязательный параметр (по умолчанию бонус счастливого часа
+    просто не применится, если не передан — это сделано специально, чтобы
+    не ломать код, который ещё не передаёт chat_id).
     """
     is_win, is_jackpot = resolve_outcome(dice_value)
+
+    happy_hour_bonus_percent = 0
+    if chat_id is not None:
+        happy_hour_bonus_percent = await get_active_happy_hour_bonus_percent(session, chat_id)
 
     user.balance -= bet
 
@@ -85,6 +98,8 @@ async def place_bet(session: AsyncSession, user: User, bet: int, dice_value: int
     if is_win:
         multiplier = JACKPOT_MULTIPLIER if is_jackpot else REGULAR_MULTIPLIER
         payout = bet * multiplier
+        if happy_hour_bonus_percent > 0:
+            payout = round(payout * (1 + happy_hour_bonus_percent / 100))
         user.balance += payout
 
     user.casino_last_bet_at = datetime.now(timezone.utc)
@@ -97,4 +112,5 @@ async def place_bet(session: AsyncSession, user: User, bet: int, dice_value: int
         payout=payout,
         net=payout - bet,
         new_balance=user.balance,
+        happy_hour_bonus_percent=happy_hour_bonus_percent,
     )

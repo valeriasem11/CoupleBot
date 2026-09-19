@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.models import Job, User
 from bot.services.career_service import get_career_level
+from bot.services.happy_hour_service import get_active_happy_hour_bonus_percent
 
 # Вероятности исходов при вызове /work.
 # Сумма должна быть равна 1.0 — обычная смена добирает всё, что осталось.
@@ -20,6 +21,16 @@ BONUS_CHANCE = 0.10  # шанс на премию (реже, чем чаевые
 # Диапазоны бонуса в процентах от базовой ЗП
 TIP_PERCENT_RANGE = (10, 15)
 BONUS_PERCENT_RANGE = (50, 100)
+
+# Случайная находка — небольшой шанс на доп. бонус сверх обычной награды
+RANDOM_FIND_CHANCE = 0.08
+RANDOM_FIND_RANGE = (50, 200)
+
+# Streak за ежедневный /work: день подряд -> разовая награда (выдаётся один
+# раз за каждое достижение планки В ТЕКУЩЕЙ серии; если серия прервалась
+# и набралась заново — награда выдаётся снова)
+WORK_STREAK_THRESHOLDS = {3: 300, 7: 700, 14: 1500, 21: 2500}
+WORK_STREAK_ACHIEVEMENT_THRESHOLD = 21
 
 
 class WorkOutcome(str, Enum):
@@ -36,6 +47,10 @@ class WorkResult:
     total: int
     career_title: str
     leveled_up_to: str | None  # если на этой смене произошло повышение — новое звание
+    happy_hour_bonus_percent: int  # 0, если счастливый час сейчас не идёт
+    random_find_amount: int  # 0, если находка не выпала
+    streak_days: int  # текущая серия дней подряд с /work
+    streak_bonus: int  # 0, если на этой смене не была достигнута ни одна планка
 
 
 def calculate_work_result(base_salary: int) -> tuple[WorkOutcome, int, int]:
@@ -85,6 +100,38 @@ def get_work_cooldown_remaining(user: User, job: Job) -> timedelta | None:
     return ready_at - now
 
 
+def _update_work_streak(user: User) -> tuple[int, int]:
+    """
+    Обновляет серию дней подряд с /work (по календарным суткам UTC — если
+    сегодня уже отмечались, серия не трогается повторно, раз в день можно
+    сходить на смену несколько раз благодаря карьере/чаевым).
+
+    Возвращает (текущая_серия, бонус_если_только_что_заработан).
+    """
+    now = datetime.now(timezone.utc)
+    today = now.date()
+
+    last_date = None
+    if user.last_work_streak_date is not None:
+        last_dt = user.last_work_streak_date
+        if last_dt.tzinfo is None:
+            last_dt = last_dt.replace(tzinfo=timezone.utc)
+        last_date = last_dt.date()
+
+    if last_date == today:
+        return user.work_streak_days, 0  # уже отмечались сегодня — серия не меняется
+
+    if last_date is not None and (today - last_date).days == 1:
+        user.work_streak_days += 1
+    else:
+        user.work_streak_days = 1  # серия прервалась (или это самый первый /work) — начинаем заново
+
+    user.last_work_streak_date = now
+
+    bonus = WORK_STREAK_THRESHOLDS.get(user.work_streak_days, 0)
+    return user.work_streak_days, bonus
+
+
 def format_timedelta(delta: timedelta) -> str:
     """Форматирует оставшееся время кулдауна в читаемый вид (часы/минуты)."""
     total_seconds = int(delta.total_seconds())
@@ -99,8 +146,10 @@ def format_timedelta(delta: timedelta) -> str:
 async def perform_work(session: AsyncSession, user: User, job: Job) -> WorkResult:
     """
     Выполняет смену: начисляет деньги пользователю (с учётом карьерного
-    множителя), увеличивает счётчик смен и обновляет время последнего
-    использования работы.
+    множителя и, если сейчас идёт, счастливого часа), с шансом добавляет
+    случайную находку, обновляет серию дней подряд с /work (с разовым
+    бонусом за 3/7/14/21 день), увеличивает счётчик смен и обновляет
+    время последнего использования работы.
 
     Вызывающий код должен ЗАРАНЕЕ проверить кулдаун через
     get_work_cooldown_remaining — эта функция сама его не проверяет.
@@ -109,10 +158,26 @@ async def perform_work(session: AsyncSession, user: User, job: Job) -> WorkResul
     level_before = get_career_level(shifts_before)
 
     effective_salary = round(job.salary * level_before.multiplier)
+
+    happy_hour_bonus_percent = 0
+    if user.chat_id is not None:
+        happy_hour_bonus_percent = await get_active_happy_hour_bonus_percent(session, user.chat_id)
+    if happy_hour_bonus_percent > 0:
+        effective_salary = round(effective_salary * (1 + happy_hour_bonus_percent / 100))
+
     outcome, bonus_amount, total = calculate_work_result(effective_salary)
 
-    user.balance += total
-    user.lifetime_earned += total
+    random_find_amount = 0
+    if random.random() < RANDOM_FIND_CHANCE:
+        random_find_amount = random.randint(*RANDOM_FIND_RANGE)
+        total += random_find_amount
+
+    streak_days, streak_bonus = _update_work_streak(user)
+
+    total_credited = total + streak_bonus
+
+    user.balance += total_credited
+    user.lifetime_earned += total_credited
     user.lifetime_work_count += 1
     user.job_last_used_at = datetime.now(timezone.utc)
     user.job_shifts_worked += 1
@@ -129,6 +194,10 @@ async def perform_work(session: AsyncSession, user: User, job: Job) -> WorkResul
         total=total,
         career_title=level_after.title,
         leveled_up_to=leveled_up_to,
+        happy_hour_bonus_percent=happy_hour_bonus_percent,
+        random_find_amount=random_find_amount,
+        streak_days=streak_days,
+        streak_bonus=streak_bonus,
     )
 
 

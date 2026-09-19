@@ -56,6 +56,25 @@ async def get_relationship_by_id(session: AsyncSession, relationship_id: int) ->
     return result.scalar_one_or_none()
 
 
+async def get_pending_proposal(
+    session: AsyncSession, from_user_id: int, to_user_id: int, chat_id: int
+) -> Relationship | None:
+    """
+    Ожидающее ответа предложение отношений именно от from_user_id к to_user_id
+    в этом чате. Нужно для текстовой альтернативы кнопкам (/accept, /decline) —
+    на случай, если исходное сообщение с кнопками потерялось.
+    """
+    result = await session.execute(
+        select(Relationship).where(
+            Relationship.user1_id == from_user_id,
+            Relationship.user2_id == to_user_id,
+            Relationship.status == RelationshipStatus.PENDING,
+            Relationship.chat_id == chat_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
 def get_partner(relationship: Relationship, user_id: int) -> User:
     """Второй участник пары (не user_id)."""
     return relationship.user2 if relationship.user1_id == user_id else relationship.user1

@@ -21,6 +21,7 @@ from bot.services.children_service import (
 from bot.services.economy_service import process_loans_tick
 from bot.services.pet_service import process_pets_tick
 from bot.services.chat_event_service import roll_random_events
+from bot.services.happy_hour_service import roll_random_happy_hours
 from bot.services.anniversary_service import process_anniversaries_tick
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,17 @@ async def _process_chat_events(bot: Bot) -> None:
                 logger.exception("Не удалось отправить уведомление об общем событии")
 
 
+async def _process_happy_hours(bot: Bot) -> None:
+    async with async_session_maker() as session:
+        new_events = await roll_random_happy_hours(session)
+
+        for event in new_events:
+            try:
+                await bot.send_message(event.chat_id, event.title)
+            except Exception:
+                logger.exception("Не удалось отправить уведомление о счастливом часе")
+
+
 async def _process_anniversaries(bot: Bot) -> None:
     async with async_session_maker() as session:
         events = await process_anniversaries_tick(session)
@@ -220,6 +232,13 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         minutes=CHECK_INTERVAL_MINUTES,
         args=[bot],
         id="process_chat_events",
+    )
+    scheduler.add_job(
+        _process_happy_hours,
+        trigger="interval",
+        minutes=CHECK_INTERVAL_MINUTES,
+        args=[bot],
+        id="process_happy_hours",
     )
     scheduler.add_job(
         _process_anniversaries,
