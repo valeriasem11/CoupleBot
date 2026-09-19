@@ -12,6 +12,8 @@ from bot.database.crud import get_or_create_user
 from bot.services.achievement_service import award, check_balance_milestones, format_unlock_text
 from bot.services.casino_service import (
     MIN_BET,
+    REGULAR_MULTIPLIER,
+    JACKPOT_MULTIPLIER,
     CasinoError,
     get_casino_cooldown_remaining,
     place_bet,
@@ -84,25 +86,23 @@ async def cmd_casino(message: Message, command: CommandObject, session: AsyncSes
     # как анимация слота отыграла в клиенте у пользователя.
     await asyncio.sleep(ANIMATION_DELAY_SECONDS)
 
-    result = await place_bet(session, user, bet, dice_value)
+    result = await place_bet(session, user, bet, dice_value, chat_id=message.chat.id)
 
     if result.is_jackpot:
-        text = (
-            f"🎆 ДЖЕКПОТ 777! 🎆\n"
-            f"Ставка {result.bet} 🪙 × {result.payout // result.bet} = {result.payout} 🪙\n\n"
-            f"Баланс: {result.new_balance} 🪙"
-        )
+        base_payout = result.bet * JACKPOT_MULTIPLIER
+        text = f"🎆 ДЖЕКПОТ 777! 🎆\nСтавка {result.bet} 🪙 × {JACKPOT_MULTIPLIER} = {base_payout} 🪙"
     elif result.is_win:
-        text = (
-            f"🎉 Выигрыш!\n"
-            f"Ставка {result.bet} 🪙 × {result.payout // result.bet} = {result.payout} 🪙\n\n"
-            f"Баланс: {result.new_balance} 🪙"
-        )
+        base_payout = result.bet * REGULAR_MULTIPLIER
+        text = f"🎉 Выигрыш!\nСтавка {result.bet} 🪙 × {REGULAR_MULTIPLIER} = {base_payout} 🪙"
     else:
-        text = (
-            f"😔 Не повезло. Ставка {result.bet} 🪙 сгорела.\n\n"
-            f"Баланс: {result.new_balance} 🪙"
+        text = f"😔 Не повезло. Ставка {result.bet} 🪙 сгорела."
+
+    if result.is_win and result.happy_hour_bonus_percent > 0:
+        text += (
+            f"\n⏰ Счастливый час: +{result.happy_hour_bonus_percent}% → итого {result.payout} 🪙"
         )
+
+    text += f"\n\nБаланс: {result.new_balance} 🪙"
 
     await message.answer(text)
 

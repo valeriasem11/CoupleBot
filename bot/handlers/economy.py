@@ -20,6 +20,7 @@ from bot.services.economy_service import (
     LoanError,
     MAX_LOAN_AMOUNT,
     LOAN_INTEREST_RATE,
+    WORK_STREAK_ACHIEVEMENT_THRESHOLD,
     format_timedelta,
     get_work_cooldown_remaining,
     perform_work,
@@ -136,7 +137,21 @@ async def cmd_work(message: Message, session: AsyncSession):
     else:
         text = f"Ты отработал(а) смену и заработал(а) {result.total} 🪙."
 
+    if result.happy_hour_bonus_percent > 0:
+        text += f"\n⏰ Счастливый час: +{result.happy_hour_bonus_percent}% к выплате!"
+
+    if result.random_find_amount > 0:
+        text += f"\n🧳 Пока шёл(шла) домой, нашёл(нашла) на земле {result.random_find_amount} 🪙!"
+
     await message.answer(text)
+
+    if result.streak_bonus > 0:
+        await message.answer(
+            f"🔥 {result.streak_days} дней подряд на работе! Бонус: +{result.streak_bonus} 🪙"
+        )
+        if result.streak_days >= WORK_STREAK_ACHIEVEMENT_THRESHOLD:
+            if await award(session, user, "workaholic"):
+                await message.answer(format_unlock_text("workaholic"))
 
     if result.leveled_up_to is not None:
         await message.answer(f"🎓 Повышение! Новое звание: {result.leveled_up_to}")

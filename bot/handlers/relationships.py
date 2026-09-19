@@ -36,6 +36,7 @@ from bot.services.relationship_service import (
     get_active_relationship,
     get_available_actions,
     get_partner,
+    get_pending_proposal,
     get_relationship_by_id,
     get_relationship_cooldown_remaining,
     marry,
@@ -526,6 +527,112 @@ async def on_breakup_cancel(callback: CallbackQuery, session: AsyncSession):
 
     await callback.message.edit_text("Отменено — вы остаётесь вместе 💕")
     await callback.answer()
+
+
+# ---------------------------------------------------------------------------
+# /accept, /decline — текстовые дублёры кнопок принятия/отклонения. Нужны
+# на случай, если исходное сообщение с кнопками потерялось (удалилось,
+# затерялось в старом чате) — тогда кнопки нажать уже нельзя, а старое
+# предложение всё ещё "висит" и не даёт отправить новое.
+# ---------------------------------------------------------------------------
+
+
+@router.message(Command("accept"))
+async def cmd_accept(message: Message, session: AsyncSession):
+    if message.reply_to_message is None or message.reply_to_message.from_user is None:
+        await message.answer(
+            "Чтобы принять предложение, ответь этой командой на сообщение "
+            "того, кто его сделал."
+        )
+        return
+
+    target_tg_user = message.reply_to_message.from_user
+    responder = await _get_user(message, session)
+    proposer = await get_or_create_user(
+        session=session,
+        telegram_id=target_tg_user.id,
+        username=target_tg_user.username,
+        first_name=target_tg_user.first_name,
+        chat_id=message.chat.id,
+    )
+
+    # 1. Есть ли ожидающее предложение встречаться именно от этого человека?
+    pending = await get_pending_proposal(session, proposer.id, responder.id, message.chat.id)
+    if pending is not None:
+        compatibility = await accept_proposal(session, pending, message.chat.id)
+        await session.refresh(pending)
+
+        await _send_achievement_notification(
+            message, session, (pending.user1, pending.user2), "first_relationship"
+        )
+
+        bonus_line = (
+            f"\n💝 Стартовый бонус: +{compatibility.starting_affection} ❤️"
+            if compatibility.starting_affection > 0
+            else ""
+        )
+        await message.answer(
+            f"💞 {_mention(pending.user1)} и {_mention(pending.user2)} теперь встречаются!\n\n"
+            f"🧠 Тест на совместимость: {compatibility.compatibility_percent}%\n"
+            f"{compatibility.compatibility_label}{bonus_line}\n\n"
+            f"Стадия: {pending.stage.name}\n"
+            f"Используйте /actions, чтобы взаимодействовать друг с другом."
+        )
+        return
+
+    # 2. Нет предложения встречаться — может, это про предложение руки и сердца?
+    relationship = await get_active_relationship(session, responder.id, message.chat.id)
+    if (
+        relationship is not None
+        and relationship.status.value == "active"
+        and get_partner(relationship, responder.id).telegram_id == target_tg_user.id
+        and await can_marry(session, relationship)
+    ):
+        await marry(session, relationship)
+        await session.refresh(relationship)
+
+        await _send_achievement_notification(
+            message, session, (relationship.user1, relationship.user2), "married"
+        )
+        await message.answer(
+            f"👰🤵 {_mention(relationship.user1)} и {_mention(relationship.user2)} поженились! Поздравляем!\n\n"
+            f"Стадия: {relationship.stage.name}"
+        )
+        return
+
+    await message.answer(
+        "Сейчас нечего принимать — не вижу ни одного актуального предложения от этого человека."
+    )
+
+
+@router.message(Command("decline"))
+async def cmd_decline(message: Message, session: AsyncSession):
+    if message.reply_to_message is None or message.reply_to_message.from_user is None:
+        await message.answer(
+            "Чтобы отклонить предложение, ответь этой командой на сообщение "
+            "того, кто его сделал."
+        )
+        return
+
+    target_tg_user = message.reply_to_message.from_user
+    responder = await _get_user(message, session)
+    proposer = await get_or_create_user(
+        session=session,
+        telegram_id=target_tg_user.id,
+        username=target_tg_user.username,
+        first_name=target_tg_user.first_name,
+        chat_id=message.chat.id,
+    )
+
+    pending = await get_pending_proposal(session, proposer.id, responder.id, message.chat.id)
+    if pending is not None:
+        await reject_proposal(session, pending)
+        await message.answer(
+            f"💔 {_mention(pending.user2)} отклонил(а) предложение {_mention(pending.user1)}."
+        )
+        return
+
+    await message.answer("Нечего отклонять — нет ожидающего предложения от этого человека.")
 
 
 # ---------------------------------------------------------------------------
