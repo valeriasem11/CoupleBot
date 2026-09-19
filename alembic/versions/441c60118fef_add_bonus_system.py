@@ -29,7 +29,7 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_happy_hours_chat_id'), 'happy_hours', ['chat_id'], unique=False)
-    op.add_column('users', sa.Column('work_streak_days', sa.Integer(), nullable=False))
+    op.add_column('users', sa.Column('work_streak_days', sa.Integer(), nullable=False, server_default='0'))
     op.add_column('users', sa.Column('last_work_streak_date', sa.DateTime(timezone=True), nullable=True))
     # ### end Alembic commands ###
 
