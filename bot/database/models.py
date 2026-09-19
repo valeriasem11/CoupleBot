@@ -152,6 +152,16 @@ class User(Base):
     gift_last_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # подработка дня — раз в сутки, серия дней подряд без пропусков даёт растущий бонус
+    last_gig_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    gig_streak: Mapped[int] = mapped_column(Integer, default=0)
+    # серия дней подряд с хотя бы одним /work (для бонусов на 3/7/14/21 день)
+    work_streak_days: Mapped[int] = mapped_column(Integer, default=0)
+    last_work_streak_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -230,12 +240,6 @@ class Relationship(Base):
     protection_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     # пара сейчас "в обиде" — блокирует /actions, пока кто-то не простит
     is_offended: Mapped[bool] = mapped_column(Boolean, default=False)
-    last_travel_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    last_travel_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
     last_travel_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -411,6 +415,23 @@ class ChatEvent(Base):
     chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
     title: Mapped[str] = mapped_column(String(200))
     affection_bonus_percent: Mapped[int] = mapped_column(Integer)  # 20 = +20%
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class HappyHour(Base):
+    """
+    "Счастливый час" — временно повышает выплаты по /work и /casino для
+    всего чата (в отличие от ChatEvent, который повышает только близость).
+    """
+
+    __tablename__ = "happy_hours"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    bonus_percent: Mapped[int] = mapped_column(Integer)  # 50 = +50%
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
