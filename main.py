@@ -24,6 +24,7 @@ from bot.handlers import (
     children,
     economy,
     gift,
+    gig,
     leaderboard,
     pet,
     relationships,
@@ -36,6 +37,7 @@ from bot.handlers import (
 )
 from bot.services.scheduler import setup_scheduler
 from bot.middlewares.db_session import DbSessionMiddleware
+from bot.middlewares.ignore_bots import IgnoreBotsMiddleware
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +51,7 @@ BOT_COMMANDS = [
     BotCommand(command="start", description="Начать / зарегистрироваться"),
     BotCommand(command="job", description="Выбрать работу"),
     BotCommand(command="work", description="Пойти на смену (раз в 6 часов)"),
+    BotCommand(command="gig", description="Подработка дня (раз в сутки)"),
     BotCommand(command="balance", description="Посмотреть баланс"),
     BotCommand(command="propose", description="Предложить отношения (ответом на сообщение)"),
     BotCommand(command="actions", description="Взаимодействовать с партнёром"),
@@ -118,6 +121,11 @@ async def main():
     )
     dp = Dispatcher()
 
+    # Игнорируем сообщения/колбэки от других ботов — регистрируем ПЕРВЫМ,
+    # чтобы отсечь их ещё до того, как они дойдут до сессии БД и хендлеров.
+    dp.message.middleware(IgnoreBotsMiddleware())
+    dp.callback_query.middleware(IgnoreBotsMiddleware())
+
     # Подключаем middleware, которое даёт хендлерам доступ к сессии БД
     dp.message.middleware(DbSessionMiddleware())
     dp.callback_query.middleware(DbSessionMiddleware())
@@ -125,6 +133,7 @@ async def main():
     # Регистрируем роутеры с хендлерами
     dp.include_router(start.router)
     dp.include_router(economy.router)
+    dp.include_router(gig.router)
     dp.include_router(relationships.router)
     dp.include_router(shop.router)
     dp.include_router(casino.router)
