@@ -220,12 +220,27 @@ async def end_relationship(session: AsyncSession, relationship: Relationship) ->
 # ---------------------------------------------------------------------------
 
 
+ACTIONS_STAGE_WINDOW = 2  # сколько последних стадий (включая текущую) показывать в /actions
+
+
 async def get_available_actions(session: AsyncSession, relationship: Relationship) -> list[RelationshipAction]:
-    """Действия, доступные на текущей стадии пары (по возрастанию требуемых очков)."""
+    """
+    Действия, доступные на текущей стадии пары (по возрастанию требуемых очков).
+
+    Показывает не ВСЕ действия со всех пройденных стадий (иначе список к
+    браку разрастается до 30 штук), а только последние ACTIONS_STAGE_WINDOW
+    стадий, включая текущую — "плавающее окно", которое подтягивается вперёд
+    по мере прогресса пары, а самые старые действия постепенно пропадают.
+    """
     current_order = relationship.stage.order
+    min_visible_order = max(1, current_order - ACTIONS_STAGE_WINDOW + 1)
+
     result = await session.execute(
         select(RelationshipAction)
-        .where(RelationshipAction.min_stage_order <= current_order)
+        .where(
+            RelationshipAction.min_stage_order <= current_order,
+            RelationshipAction.min_stage_order >= min_visible_order,
+        )
         .order_by(RelationshipAction.affection_reward)
     )
     return list(result.scalars().all())
