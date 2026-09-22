@@ -26,6 +26,7 @@ from bot.handlers import (
     gift,
     gig,
     leaderboard,
+    payment,
     pet,
     relationships,
     shop,
@@ -53,6 +54,7 @@ BOT_COMMANDS = [
     BotCommand(command="work", description="Пойти на смену (раз в 6 часов)"),
     BotCommand(command="gig", description="Подработка дня (раз в сутки)"),
     BotCommand(command="balance", description="Посмотреть баланс"),
+    BotCommand(command="pay", description="Перевести монеты другому игроку"),
     BotCommand(command="propose", description="Предложить отношения (ответом на сообщение)"),
     BotCommand(command="actions", description="Взаимодействовать с партнёром"),
     BotCommand(command="couple", description="Профиль пары"),
@@ -148,6 +150,7 @@ async def main():
     dp.include_router(stats.router)
     dp.include_router(gift.router)
     dp.include_router(chat_tracking.router)
+    dp.include_router(payment.router)
 
     # На всякий случай сбрасываем накопленные апдейты перед стартом polling
     await bot.delete_webhook(drop_pending_updates=True)
