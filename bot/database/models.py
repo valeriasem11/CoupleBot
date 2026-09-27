@@ -501,6 +501,14 @@ class Pet(Base):
     last_mood_decay_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # питомец сейчас "пропал" (настроение упало до 0) — можно попробовать
+    # вернуть через объявления (бесплатно, дольше) или поисковика (платно, сразу)
+    is_missing: Mapped[bool] = mapped_column(Boolean, default=False)
+    missing_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # выбранный способ поиска: "poster" (объявления) или None (ещё не выбрали)
+    search_method: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     relationship_: Mapped["Relationship"] = relationship(lazy="joined")
     species: Mapped["PetSpecies"] = relationship(lazy="joined")
