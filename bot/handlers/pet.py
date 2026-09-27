@@ -17,14 +17,19 @@ from bot.keyboards.pet import (
 from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.pet_service import (
     PET_ACTIONS,
+    PET_SEARCH_PAID_PREFIX,
+    PET_SEARCH_POSTER_PREFIX,
     PetError,
     adopt_pet,
+    choose_poster_search,
     format_timedelta,
     get_all_species,
     get_pet,
     get_pet_action_cooldown_remaining,
+    get_pet_by_id,
     get_species_by_id,
     mood_label,
+    pay_for_search,
     perform_pet_action,
     rename_pet,
 )
@@ -211,4 +216,53 @@ async def on_pet_action(callback: CallbackQuery, session: AsyncSession):
         f"😊 Настроение {pet.name}: +{result.mood_gained} (теперь {result.new_mood}%)"
     )
     await callback.message.edit_text(text)
+    await callback.answer()
+
+
+# ---------------------------------------------------------------------------
+# Возврат сбежавшего питомца
+# ---------------------------------------------------------------------------
+
+
+@router.callback_query(F.data.startswith(PET_SEARCH_POSTER_PREFIX))
+async def on_pet_search_poster(callback: CallbackQuery, session: AsyncSession):
+    pet_id = int(callback.data.removeprefix(PET_SEARCH_POSTER_PREFIX))
+    pet = await get_pet_by_id(session, pet_id)
+    if pet is None:
+        await callback.answer("Этот питомец уже недоступен.", show_alert=True)
+        return
+
+    try:
+        await choose_poster_search(session, pet)
+    except PetError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"{callback.message.text}\n\n"
+        f"📋 Вы расклеили объявления по району. Остаётся только ждать вестей..."
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith(PET_SEARCH_PAID_PREFIX))
+async def on_pet_search_paid(callback: CallbackQuery, session: AsyncSession):
+    pet_id = int(callback.data.removeprefix(PET_SEARCH_PAID_PREFIX))
+    pet = await get_pet_by_id(session, pet_id)
+    if pet is None:
+        await callback.answer("Этот питомец уже недоступен.", show_alert=True)
+        return
+
+    user = await _get_user(callback, session)
+
+    try:
+        new_mood = await pay_for_search(session, pet, user)
+    except PetError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+
+    await callback.message.edit_text(
+        f"🎉 Поисковик нашёл {pet.name}! Питомец сразу вернулся домой "
+        f"(настроение: {new_mood}%)."
+    )
     await callback.answer()
