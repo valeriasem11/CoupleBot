@@ -7,6 +7,7 @@
 import logging
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot.database.engine import async_session_maker
@@ -19,7 +20,12 @@ from bot.services.children_service import (
     process_children_tick,
 )
 from bot.services.economy_service import process_loans_tick
-from bot.services.pet_service import process_pets_tick
+from bot.services.pet_service import (
+    PET_SEARCH_PAID_PREFIX,
+    PET_SEARCH_POSTER_PREFIX,
+    process_missing_pets_tick,
+    process_pets_tick,
+)
 from bot.services.chat_event_service import roll_random_events
 from bot.services.happy_hour_service import roll_random_happy_hours
 from bot.services.anniversary_service import process_anniversaries_tick
@@ -156,11 +162,61 @@ async def _process_pets(bot: Bot) -> None:
         events = await process_pets_tick(session)
 
         for event in events:
-            text = f"🐾 {event.pet_name} убежал(а) — за ним/ней совсем не следили."
+            text = (
+                f"🐾 {event.pet_name} убежал(а)! За ним/ней совсем не следили...\n\n"
+                f"Ещё можно попробовать вернуть питомца:"
+            )
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="📋 Расклеить объявления (бесплатно, ~12ч)",
+                            callback_data=f"{PET_SEARCH_POSTER_PREFIX}{event.pet_id}",
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            text="💰 Нанять поисковика за 300 🪙 (сразу)",
+                            callback_data=f"{PET_SEARCH_PAID_PREFIX}{event.pet_id}",
+                        )
+                    ],
+                ]
+            )
+            try:
+                await bot.send_message(event.chat_id, text, reply_markup=keyboard)
+            except Exception:
+                logger.exception("Не удалось отправить уведомление об убежавшем питомце")
+
+
+async def _process_missing_pets(bot: Bot) -> None:
+    async with async_session_maker() as session:
+        found_events, lost_events = await process_missing_pets_tick(session)
+
+        for event in found_events:
+            text = (
+                f"🎉 Ваши объявления помогли! {event.pet_name} нашёлся(-лась) "
+                f"и вернулся(-лась) домой!"
+            )
             try:
                 await bot.send_message(event.chat_id, text)
             except Exception:
-                logger.exception("Не удалось отправить уведомление об убежавшем питомце")
+                logger.exception("Не удалось отправить уведомление о найденном питомце")
+
+        for event in lost_events:
+            if event.abandoned:
+                text = (
+                    f"💔 Никто так и не начал искать {event.pet_name}... "
+                    f"К сожалению, питомец потерялся навсегда."
+                )
+            else:
+                text = (
+                    f"💔 К сожалению, объявления не помогли — {event.pet_name} "
+                    f"так и не нашёлся(-лась)."
+                )
+            try:
+                await bot.send_message(event.chat_id, text)
+            except Exception:
+                logger.exception("Не удалось отправить уведомление о потерянном питомце")
 
 
 async def _process_chat_events(bot: Bot) -> None:
@@ -225,6 +281,13 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         minutes=CHECK_INTERVAL_MINUTES,
         args=[bot],
         id="process_pets",
+    )
+    scheduler.add_job(
+        _process_missing_pets,
+        trigger="interval",
+        minutes=CHECK_INTERVAL_MINUTES,
+        args=[bot],
+        id="process_missing_pets",
     )
     scheduler.add_job(
         _process_chat_events,

@@ -46,3 +46,27 @@ async def transfer_coins(
         sender_new_balance=sender.balance,
         receiver_new_balance=receiver.balance,
     )
+
+
+async def transfer_all_coins(session: AsyncSession, sender: User, receiver: User) -> PaymentResult:
+    """
+    Переводит ВЕСЬ баланс отправителя целиком (для /payall) — в отличие от
+    transfer_coins, не требует минимальной суммы (раз человек явно хочет
+    отдать всё, что у него есть, а не какую-то конкретную сумму).
+    """
+    if sender.id == receiver.id:
+        raise PaymentError("Нельзя перевести деньги самой(ому) себе 🙂")
+    if sender.balance <= 0:
+        raise PaymentError("У тебя нечего переводить — баланс уже пуст.")
+
+    amount = sender.balance
+    sender.balance = 0
+    receiver.balance += amount
+
+    await session.commit()
+
+    return PaymentResult(
+        amount=amount,
+        sender_new_balance=sender.balance,
+        receiver_new_balance=receiver.balance,
+    )

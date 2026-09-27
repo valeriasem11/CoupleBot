@@ -7,6 +7,7 @@
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import random
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,17 @@ PET_ACTION_COOLDOWN = timedelta(hours=6)
 # Угасание настроения питомца — вдвое медленнее, чем у детей (там -5 / 6ч)
 MOOD_DECAY_AMOUNT = 5
 MOOD_DECAY_INTERVAL = timedelta(hours=12)
+
+# Возврат сбежавшего питомца
+POSTER_SEARCH_WAIT = timedelta(hours=12)  # бесплатный вариант — "расклеить объявления"
+POSTER_SEARCH_CHANCE = 0.6
+POSTER_SEARCH_RETURN_MOOD = 30
+PAID_SEARCH_COST = 300  # платный вариант — мгновенно, но за деньги
+PAID_SEARCH_RETURN_MOOD = 50
+MISSING_ABANDON_TIMEOUT = timedelta(hours=24)  # если вообще никто не выбрал способ поиска
+
+PET_SEARCH_POSTER_PREFIX = "pet_search_poster:"
+PET_SEARCH_PAID_PREFIX = "pet_search_paid:"
 
 # Действия с питомцем — единый набор, без деления по возрасту (питомец не растёт)
 PET_ACTIONS = {
@@ -123,6 +135,54 @@ def get_pet_action_cooldown_remaining(pet: Pet) -> timedelta | None:
     return ready_at - now
 
 
+# ---------------------------------------------------------------------------
+# Возврат сбежавшего питомца
+# ---------------------------------------------------------------------------
+
+
+async def get_pet_by_id(session: AsyncSession, pet_id: int) -> Pet | None:
+    result = await session.execute(select(Pet).where(Pet.id == pet_id))
+    return result.scalar_one_or_none()
+
+
+async def choose_poster_search(session: AsyncSession, pet: Pet) -> None:
+    """
+    Бесплатный вариант — "расклеить объявления". Сам результат не решается
+    сразу, а разыгрывается позже планировщиком (см. process_missing_pets_tick),
+    когда пройдёт POSTER_SEARCH_WAIT.
+    """
+    if not pet.is_missing:
+        raise PetError("Этот питомец сейчас не пропадал.")
+    if pet.search_method is not None:
+        raise PetError("Вы уже выбрали способ поиска — просто подождите вестей.")
+
+    pet.search_method = "poster"
+    await session.commit()
+
+
+async def pay_for_search(session: AsyncSession, pet: Pet, user: User) -> int:
+    """
+    Платный вариант — нанять поисковика. Решается мгновенно и всегда
+    успешно (списывается PAID_SEARCH_COST с личного баланса user).
+    Возвращает новое настроение питомца.
+    """
+    if not pet.is_missing:
+        raise PetError("Этот питомец сейчас не пропадал.")
+    if user.balance < PAID_SEARCH_COST:
+        raise PetError(
+            f"Недостаточно средств (нужно {PAID_SEARCH_COST} 🪙, доступно {user.balance} 🪙)."
+        )
+
+    user.balance -= PAID_SEARCH_COST
+    pet.is_missing = False
+    pet.search_method = None
+    pet.missing_since = None
+    pet.mood = PAID_SEARCH_RETURN_MOOD
+
+    await session.commit()
+    return pet.mood
+
+
 @dataclass
 class PetActionResult:
     affection_gained: int
@@ -158,17 +218,20 @@ async def perform_pet_action(
 @dataclass
 class PetRunAwayEvent:
     chat_id: int
+    pet_id: int
     pet_name: str
 
 
 async def process_pets_tick(session: AsyncSession) -> list[PetRunAwayEvent]:
     """
     Один "тик" планировщика: угасание настроения у всех питомцев.
-    При падении до 0 — питомец убегает (запись удаляется).
+    При падении до 0 — питомец "пропадает" (is_missing=True), но НЕ удаляется
+    сразу: хозяева получат сообщение с выбором, как попробовать его вернуть
+    (см. choose_poster_search / pay_for_search и process_missing_pets_tick).
     """
     now = datetime.now(timezone.utc)
 
-    result = await session.execute(select(Pet))
+    result = await session.execute(select(Pet).where(Pet.is_missing.is_(False)))
     pets = list(result.scalars().all())
 
     events: list[PetRunAwayEvent] = []
@@ -187,12 +250,86 @@ async def process_pets_tick(session: AsyncSession) -> list[PetRunAwayEvent]:
 
             if pet.mood <= 0:
                 relationship = pet.relationship_
+                pet.is_missing = True
+                pet.missing_since = now
                 if relationship.chat_id is not None:
-                    events.append(PetRunAwayEvent(chat_id=relationship.chat_id, pet_name=pet.name))
-                await session.delete(pet)
+                    events.append(
+                        PetRunAwayEvent(chat_id=relationship.chat_id, pet_id=pet.id, pet_name=pet.name)
+                    )
 
     await session.commit()
     return events
+
+
+@dataclass
+class PetFoundEvent:
+    chat_id: int
+    pet_name: str
+
+
+@dataclass
+class PetLostForeverEvent:
+    chat_id: int
+    pet_name: str
+    abandoned: bool  # True, если никто вообще не выбрал способ поиска
+
+
+async def process_missing_pets_tick(
+    session: AsyncSession,
+) -> tuple[list[PetFoundEvent], list[PetLostForeverEvent]]:
+    """
+    Один "тик" планировщика для пропавших питомцев:
+    - если выбраны "объявления" и прошло POSTER_SEARCH_WAIT — разыгрывает шанс;
+    - если ничего не выбрали за MISSING_ABANDON_TIMEOUT — питомец теряется навсегда.
+    """
+    now = datetime.now(timezone.utc)
+
+    result = await session.execute(select(Pet).where(Pet.is_missing.is_(True)))
+    missing_pets = list(result.scalars().all())
+
+    found_events: list[PetFoundEvent] = []
+    lost_events: list[PetLostForeverEvent] = []
+    changed = False
+
+    for pet in missing_pets:
+        missing_since = pet.missing_since
+        if missing_since is None:
+            continue
+        if missing_since.tzinfo is None:
+            missing_since = missing_since.replace(tzinfo=timezone.utc)
+        elapsed = now - missing_since
+
+        relationship = pet.relationship_
+        chat_id = relationship.chat_id if relationship else None
+
+        if pet.search_method == "poster" and elapsed >= POSTER_SEARCH_WAIT:
+            changed = True
+            if random.random() < POSTER_SEARCH_CHANCE:
+                pet.is_missing = False
+                pet.search_method = None
+                pet.missing_since = None
+                pet.mood = POSTER_SEARCH_RETURN_MOOD
+                if chat_id is not None:
+                    found_events.append(PetFoundEvent(chat_id=chat_id, pet_name=pet.name))
+            else:
+                if chat_id is not None:
+                    lost_events.append(
+                        PetLostForeverEvent(chat_id=chat_id, pet_name=pet.name, abandoned=False)
+                    )
+                await session.delete(pet)
+
+        elif pet.search_method is None and elapsed >= MISSING_ABANDON_TIMEOUT:
+            changed = True
+            if chat_id is not None:
+                lost_events.append(
+                    PetLostForeverEvent(chat_id=chat_id, pet_name=pet.name, abandoned=True)
+                )
+            await session.delete(pet)
+
+    if changed:
+        await session.commit()
+
+    return found_events, lost_events
 
 
 def format_timedelta(delta: timedelta) -> str:
