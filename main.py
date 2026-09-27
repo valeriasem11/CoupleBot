@@ -55,6 +55,7 @@ BOT_COMMANDS = [
     BotCommand(command="gig", description="Подработка дня (раз в сутки)"),
     BotCommand(command="balance", description="Посмотреть баланс"),
     BotCommand(command="pay", description="Перевести монеты другому игроку"),
+    BotCommand(command="payall", description="Перевести весь баланс другому игроку"),
     BotCommand(command="propose", description="Предложить отношения (ответом на сообщение)"),
     BotCommand(command="actions", description="Взаимодействовать с партнёром"),
     BotCommand(command="couple", description="Профиль пары"),
