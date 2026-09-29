@@ -75,9 +75,22 @@ async def get_species_by_id(session: AsyncSession, species_id: int) -> PetSpecie
 # ---------------------------------------------------------------------------
 
 
-async def get_pet(session: AsyncSession, relationship_id: int) -> Pet | None:
-    result = await session.execute(select(Pet).where(Pet.relationship_id == relationship_id))
-    return result.scalar_one_or_none()
+async def get_pets(session: AsyncSession, relationship_id: int) -> list[Pet]:
+    """Все питомцы пары, в порядке появления (первый заведённый — первый в списке)."""
+    result = await session.execute(
+        select(Pet).where(Pet.relationship_id == relationship_id).order_by(Pet.adopted_at)
+    )
+    return list(result.scalars().all())
+
+
+def get_pet_limit(relationship: Relationship) -> int:
+    """
+    Сколько питомцев можно завести этой паре. Без дома (или пока просто
+    не в браке) — всегда 1. С домом — по вместимости дома (max_pets).
+    """
+    if relationship.house is not None:
+        return relationship.house.max_pets
+    return 1
 
 
 async def adopt_pet(
@@ -87,9 +100,19 @@ async def adopt_pet(
     if relationship.status not in (RelationshipStatus.ACTIVE, RelationshipStatus.MARRIED):
         raise PetError("Заводить питомца можно, только когда вы вместе.")
 
-    existing = await get_pet(session, relationship.id)
-    if existing is not None:
-        raise PetError(f"У вашей пары уже есть питомец — {existing.name}. Сначала позаботьтесь о нём!")
+    existing_pets = await get_pets(session, relationship.id)
+    limit = get_pet_limit(relationship)
+
+    if len(existing_pets) >= limit:
+        if relationship.house is None:
+            raise PetError(
+                f"У вашей пары уже есть питомец. Без дома можно завести только одного — "
+                f"купите дом в /shop, чтобы заводить больше."
+            )
+        raise PetError(
+            f"У вашей пары уже максимум питомцев для текущего дома ({limit}). "
+            f"Нужен дом побольше — загляните в /shop."
+        )
 
     if user.balance < species.price:
         raise PetError(
@@ -111,10 +134,7 @@ async def adopt_pet(
     return pet
 
 
-async def rename_pet(session: AsyncSession, relationship_id: int, name: str) -> Pet:
-    pet = await get_pet(session, relationship_id)
-    if pet is None:
-        raise PetError("У вашей пары пока нет питомца.")
+async def rename_pet(session: AsyncSession, pet: Pet, name: str) -> Pet:
     pet.name = name
     await session.commit()
     return pet
