@@ -55,6 +55,8 @@ class House(Base):
     name: Mapped[str] = mapped_column(String(100))
     price: Mapped[int] = mapped_column(Integer)
     max_children: Mapped[int] = mapped_column(Integer)
+    # сколько питомцев можно завести при этом доме (без дома — лимит всегда 1)
+    max_pets: Mapped[int] = mapped_column(Integer, default=1)
     # порядок для сортировки "от дешёвого к дорогому" в магазине
     order: Mapped[int] = mapped_column(Integer, unique=True)
 

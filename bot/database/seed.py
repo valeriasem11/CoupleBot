@@ -44,12 +44,12 @@ JOBS = [
 ]
 
 HOUSES = [
-    {"code": "studio", "name": "🏠 Студия", "price": 5000, "max_children": 0, "order": 1},
-    {"code": "small_house", "name": "🏡 Небольшой дом", "price": 12000, "max_children": 1, "order": 2},
-    {"code": "townhouse", "name": "🏘 Таунхаус", "price": 25000, "max_children": 2, "order": 3},
-    {"code": "cottage", "name": "🌳 Загородный коттедж", "price": 45000, "max_children": 3, "order": 4},
-    {"code": "mansion", "name": "🏛 Роскошный особняк", "price": 80000, "max_children": 4, "order": 5},
-    {"code": "villa", "name": "🏰 Семейная вилла", "price": 150000, "max_children": 5, "order": 6},
+    {"code": "studio", "name": "🏠 Студия", "price": 5000, "max_children": 0, "max_pets": 1, "order": 1},
+    {"code": "small_house", "name": "🏡 Небольшой дом", "price": 12000, "max_children": 1, "max_pets": 2, "order": 2},
+    {"code": "townhouse", "name": "🏘 Таунхаус", "price": 25000, "max_children": 2, "max_pets": 3, "order": 3},
+    {"code": "cottage", "name": "🌳 Загородный коттедж", "price": 45000, "max_children": 3, "max_pets": 4, "order": 4},
+    {"code": "mansion", "name": "🏛 Роскошный особняк", "price": 80000, "max_children": 4, "max_pets": 5, "order": 5},
+    {"code": "villa", "name": "🏰 Семейная вилла", "price": 150000, "max_children": 5, "max_pets": 6, "order": 6},
 ]
 
 CARS = [
