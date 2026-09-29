@@ -25,7 +25,7 @@ from bot.keyboards.relationships import (
 )
 from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.children_service import get_active_children_count
-from bot.services.pet_service import get_pet
+from bot.services.pet_service import get_pets
 from bot.services.relationship_service import (
     RelationshipError,
     accept_proposal,
@@ -351,12 +351,14 @@ async def cmd_couple(message: Message, session: AsyncSession):
         days_married = (now - relationship.married_at).days
         lines.append(f"💍 В браке: {days_married} дн.")
 
-    pet = await get_pet(session, relationship.id)
-    if pet is not None:
-        pet_emoji = pet.species.name.split(" ", 1)[0]
+    pets = await get_pets(session, relationship.id)
+    if pets:
         lines.append("")
         lines.append("Питомцы:")
-        lines.append(f"{pet_emoji} {pet.name}")
+        for pet in pets:
+            pet_emoji = pet.species.name.split(" ", 1)[0]
+            status = " (🔍 в розыске)" if pet.is_missing else ""
+            lines.append(f"{pet_emoji} {pet.name}{status}")
 
     if relationship.status.value == "married":
         lines.append("")
