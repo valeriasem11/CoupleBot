@@ -1,19 +1,16 @@
 """
-Хендлеры питомцев: /petshop (покупка), /pet (карточка), /name_pet (переименовать),
-/pet_actions (взаимодействие).
+Хендлеры питомцев: /petshop (покупка), /pet (карточка/список), /name_pet
+(переименовать), /pet_actions (взаимодействие).
+
+Лимит питомцев зависит от дома (см. pet_service.get_pet_limit) — без дома
+всегда можно завести только одного, с домом — по его вместимости.
 """
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import get_or_create_user
-from bot.keyboards.pet import (
-    PET_ACTION_PREFIX,
-    PET_BUY_PREFIX,
-    build_pet_actions_keyboard,
-    build_pet_species_keyboard,
-)
 from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.pet_service import (
     PET_ACTIONS,
@@ -24,9 +21,10 @@ from bot.services.pet_service import (
     choose_poster_search,
     format_timedelta,
     get_all_species,
-    get_pet,
     get_pet_action_cooldown_remaining,
     get_pet_by_id,
+    get_pet_limit,
+    get_pets,
     get_species_by_id,
     mood_label,
     pay_for_search,
@@ -36,6 +34,10 @@ from bot.services.pet_service import (
 from bot.services.relationship_service import get_active_relationship, get_partner
 
 router = Router(name="pets")
+
+PET_BUY_PREFIX = "pet_buy:"
+PET_ACTION_PREFIX = "pet_action:"
+PICK_PET_PREFIX = "pet_pick:"
 
 
 async def _get_user(message_or_callback, session: AsyncSession):
@@ -56,6 +58,50 @@ def _mention(user) -> str:
     return user.first_name
 
 
+def _build_pet_species_keyboard(species_list) -> InlineKeyboardMarkup:
+    buttons = [
+        [
+            InlineKeyboardButton(
+                text=f"{s.name} — {s.price} 🪙", callback_data=f"{PET_BUY_PREFIX}{s.id}"
+            )
+        ]
+        for s in species_list
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_pick_pet_keyboard(pets) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text=f"🐾 {p.name}", callback_data=f"{PICK_PET_PREFIX}{p.id}")]
+        for p in pets
+        if not p.is_missing
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _build_pet_actions_keyboard(pet_id: int) -> InlineKeyboardMarkup:
+    buttons = []
+    row = []
+    for code, action in PET_ACTIONS.items():
+        row.append(
+            InlineKeyboardButton(
+                text=f"{action['emoji']} {action['name']}",
+                callback_data=f"{PET_ACTION_PREFIX}{pet_id}:{code}",
+            )
+        )
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# ---------------------------------------------------------------------------
+# /petshop — покупка питомца
+# ---------------------------------------------------------------------------
+
+
 @router.message(Command("petshop"))
 async def cmd_petshop(message: Message, session: AsyncSession):
     user = await _get_user(message, session)
@@ -65,17 +111,27 @@ async def cmd_petshop(message: Message, session: AsyncSession):
         await message.answer("У тебя пока нет пары.")
         return
 
-    existing = await get_pet(session, relationship.id)
-    if existing is not None:
-        await message.answer(
-            f"У вашей пары уже есть питомец — {existing.name}. Посмотреть: /pet"
-        )
+    existing_pets = await get_pets(session, relationship.id)
+    limit = get_pet_limit(relationship)
+
+    if len(existing_pets) >= limit:
+        if relationship.house is None:
+            await message.answer(
+                f"У вашей пары уже есть питомец. Без дома можно завести только одного — "
+                f"купите дом в /shop, чтобы заводить больше."
+            )
+        else:
+            await message.answer(
+                f"У вашей пары уже максимум питомцев для текущего дома ({limit}). "
+                f"Нужен дом побольше — загляните в /shop."
+            )
         return
 
     species_list = await get_all_species(session)
+    slots_line = f" ({len(existing_pets)}/{limit})" if limit > 1 else ""
     await message.answer(
-        "🐾 Кого хотите завести?\n(деньги спишутся с твоего личного баланса)",
-        reply_markup=build_pet_species_keyboard(species_list),
+        f"🐾 Кого хотите завести?{slots_line}\n(деньги спишутся с твоего личного баланса)",
+        reply_markup=_build_pet_species_keyboard(species_list),
     )
 
 
@@ -114,15 +170,15 @@ async def on_pet_buy(callback: CallbackQuery, session: AsyncSession):
     await callback.answer()
 
 
+# ---------------------------------------------------------------------------
+# /name_pet — переименовать питомца
+# ---------------------------------------------------------------------------
+
+
 @router.message(Command("name_pet"))
 async def cmd_name_pet(message: Message, command: CommandObject, session: AsyncSession):
     if command.args is None or not command.args.strip():
         await message.answer("Укажи имя, например: /name_pet Барсик")
-        return
-
-    name = command.args.strip()
-    if len(name) > 100:
-        await message.answer("Имя слишком длинное.")
         return
 
     user = await _get_user(message, session)
@@ -131,13 +187,46 @@ async def cmd_name_pet(message: Message, command: CommandObject, session: AsyncS
         await message.answer("У тебя пока нет пары.")
         return
 
-    try:
-        pet = await rename_pet(session, relationship.id, name)
-    except PetError as e:
-        await message.answer(str(e))
+    pets = await get_pets(session, relationship.id)
+    if not pets:
+        await message.answer("У вашей пары пока нет питомца. Завести: /petshop")
         return
 
-    await message.answer(f"🐾 Теперь вашего питомца зовут {pet.name}!")
+    args = command.args.strip()
+
+    if len(pets) == 1:
+        name = args
+        target_pet = pets[0]
+    else:
+        # Несколько питомцев — первое слово должно быть номером из /pet
+        parts = args.split(maxsplit=1)
+        if len(parts) < 2 or not parts[0].isdigit():
+            listing = "\n".join(f"{i}. {p.name}" for i, p in enumerate(pets, start=1))
+            await message.answer(
+                f"У вас несколько питомцев — укажи номер и новое имя, например: "
+                f"/name_pet 2 Барсик\n\n{listing}"
+            )
+            return
+
+        index = int(parts[0]) - 1
+        if index < 0 or index >= len(pets):
+            await message.answer(f"Такого номера нет — их всего {len(pets)}.")
+            return
+
+        target_pet = pets[index]
+        name = parts[1]
+
+    if len(name) > 100:
+        await message.answer("Имя слишком длинное.")
+        return
+
+    pet = await rename_pet(session, target_pet, name)
+    await message.answer(f"🐾 Теперь этого питомца зовут {pet.name}!")
+
+
+# ---------------------------------------------------------------------------
+# /pet — карточка(и) питомца
+# ---------------------------------------------------------------------------
 
 
 @router.message(Command("pet"))
@@ -148,15 +237,47 @@ async def cmd_pet(message: Message, session: AsyncSession):
         await message.answer("У тебя пока нет пары.")
         return
 
-    pet = await get_pet(session, relationship.id)
-    if pet is None:
+    pets = await get_pets(session, relationship.id)
+    if not pets:
         await message.answer("У вашей пары пока нет питомца. Завести: /petshop")
         return
 
-    await message.answer(
-        f"{pet.species.name.split(' ', 1)[0]} {pet.name}\n"
-        f"😊 Настроение: {mood_label(pet.mood)} ({pet.mood}%)"
+    if len(pets) == 1:
+        pet = pets[0]
+        status_line = "🔍 В розыске..." if pet.is_missing else f"😊 Настроение: {mood_label(pet.mood)} ({pet.mood}%)"
+        await message.answer(f"{pet.species.name.split(' ', 1)[0]} {pet.name}\n{status_line}")
+        return
+
+    lines = [f"🐾 Питомцы пары ({len(pets)}):", ""]
+    for i, pet in enumerate(pets, start=1):
+        emoji = pet.species.name.split(" ", 1)[0]
+        status = "🔍 в розыске" if pet.is_missing else f"{mood_label(pet.mood)} ({pet.mood}%)"
+        lines.append(f"{i}. {emoji} {pet.name} — {status}")
+
+    await message.answer("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# /pet_actions — взаимодействие с питомцем
+# ---------------------------------------------------------------------------
+
+
+async def _send_pet_actions(target, pet, session: AsyncSession, edit: bool):
+    cooldown_line = ""
+    remaining = get_pet_action_cooldown_remaining(pet)
+    if remaining is not None:
+        cooldown_line = f"\n⏳ Следующее действие будет доступно через {format_timedelta(remaining)}"
+
+    text = (
+        f"🐾 {pet.name} · Настроение: {mood_label(pet.mood)} ({pet.mood}%)"
+        f"{cooldown_line}\n\nВыбери действие:"
     )
+    keyboard = _build_pet_actions_keyboard(pet.id)
+
+    if edit:
+        await target.message.edit_text(text, reply_markup=keyboard)
+    else:
+        await target.answer(text, reply_markup=keyboard)
 
 
 @router.message(Command("pet_actions"))
@@ -167,36 +288,60 @@ async def cmd_pet_actions(message: Message, session: AsyncSession):
         await message.answer("У тебя пока нет пары.")
         return
 
-    pet = await get_pet(session, relationship.id)
-    if pet is None:
-        await message.answer("У вашей пары пока нет питомца. Завести: /petshop")
+    pets = await get_pets(session, relationship.id)
+    available_pets = [p for p in pets if not p.is_missing]
+
+    if not available_pets:
+        if pets:
+            await message.answer("Ваш питомец сейчас пропал — сначала попробуйте его вернуть.")
+        else:
+            await message.answer("У вашей пары пока нет питомца. Завести: /petshop")
         return
 
-    cooldown_line = ""
-    remaining = get_pet_action_cooldown_remaining(pet)
-    if remaining is not None:
-        cooldown_line = f"\n⏳ Следующее действие будет доступно через {format_timedelta(remaining)}"
+    if len(available_pets) == 1:
+        await _send_pet_actions(message, available_pets[0], session, edit=False)
+        return
 
     await message.answer(
-        f"🐾 {pet.name} · Настроение: {mood_label(pet.mood)} ({pet.mood}%)"
-        f"{cooldown_line}\n\nВыбери действие:",
-        reply_markup=build_pet_actions_keyboard(PET_ACTIONS),
+        "У вас несколько питомцев — с кем взаимодействовать?",
+        reply_markup=_build_pick_pet_keyboard(available_pets),
     )
+
+
+@router.callback_query(F.data.startswith(PICK_PET_PREFIX))
+async def on_pick_pet(callback: CallbackQuery, session: AsyncSession):
+    pet_id = int(callback.data.removeprefix(PICK_PET_PREFIX))
+    pet = await get_pet_by_id(session, pet_id)
+
+    if pet is None or pet.is_missing:
+        await callback.answer("Этот питомец сейчас недоступен.", show_alert=True)
+        return
+
+    user = await _get_user(callback, session)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
+    if relationship is None or pet.relationship_id != relationship.id:
+        await callback.answer("Это не ваш питомец.", show_alert=True)
+        return
+
+    await _send_pet_actions(callback, pet, session, edit=True)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith(PET_ACTION_PREFIX))
 async def on_pet_action(callback: CallbackQuery, session: AsyncSession):
-    action_code = callback.data.removeprefix(PET_ACTION_PREFIX)
+    payload = callback.data.removeprefix(PET_ACTION_PREFIX)
+    pet_id_str, action_code = payload.split(":", 1)
+    pet_id = int(pet_id_str)
+
+    pet = await get_pet_by_id(session, pet_id)
+    if pet is None or pet.is_missing:
+        await callback.answer("Этот питомец сейчас недоступен.", show_alert=True)
+        return
 
     user = await _get_user(callback, session)
     relationship = await get_active_relationship(session, user.id, user.chat_id)
-    if relationship is None:
-        await callback.answer("У тебя больше нет пары.", show_alert=True)
-        return
-
-    pet = await get_pet(session, relationship.id)
-    if pet is None:
-        await callback.answer("У вашей пары больше нет питомца.", show_alert=True)
+    if relationship is None or pet.relationship_id != relationship.id:
+        await callback.answer("Это не ваш питомец.", show_alert=True)
         return
 
     remaining = get_pet_action_cooldown_remaining(pet)
