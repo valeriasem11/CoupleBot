@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.database.crud import get_or_create_user
@@ -20,7 +20,6 @@ from bot.keyboards.relationships import (
     PROPOSAL_REJECT_PREFIX,
     build_actions_keyboard,
     build_breakup_confirm_keyboard,
-    build_marry_keyboard,
     build_proposal_keyboard,
 )
 from bot.services.achievement_service import award_couple, format_unlock_text
@@ -47,6 +46,28 @@ from bot.services.relationship_service import (
 )
 
 router = Router(name="relationships")
+
+# Кнопки предложения руки и сердца. В callback_data зашиты id пары и id того,
+# кто делает предложение — так бот знает, кто вправе нажимать «Принять/Отклонить».
+MARRY_YES_PREFIX = "mrg_yes:"
+MARRY_NO_PREFIX = "mrg_no:"
+
+
+def _build_marry_keyboard(relationship_id: int, proposer_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="💍 Согласен(на)", callback_data=f"{MARRY_YES_PREFIX}{relationship_id}:{proposer_id}"),
+            InlineKeyboardButton(text="💔 Отклонить", callback_data=f"{MARRY_NO_PREFIX}{relationship_id}:{proposer_id}"),
+        ]]
+    )
+
+
+def _parse_marry_payload(data: str, prefix: str) -> tuple[int, int] | None:
+    try:
+        rel_id, proposer_id = data.removeprefix(prefix).split(":")
+        return int(rel_id), int(proposer_id)
+    except ValueError:
+        return None
 
 # Случайные комплименты — подставляются вместо стандартного лога для действия "compliment"
 COMPLIMENTS = [
@@ -357,8 +378,7 @@ async def cmd_couple(message: Message, session: AsyncSession):
         lines.append("Питомцы:")
         for pet in pets:
             pet_emoji = pet.species.name.split(" ", 1)[0]
-            status = " (🔍 в розыске)" if pet.is_missing else ""
-            lines.append(f"{pet_emoji} {pet.name}{status}")
+            lines.append(f"{pet_emoji} {pet.name}")
 
     if relationship.status.value == "married":
         lines.append("")
@@ -396,22 +416,37 @@ async def cmd_marry(message: Message, session: AsyncSession):
     await message.answer(
         f"💍 {_mention(user)} делает {_mention(partner)} предложение руки и сердца!\n\n"
         f"{_mention(partner)}, что скажешь?",
-        reply_markup=build_marry_keyboard(relationship.id),
+        reply_markup=_build_marry_keyboard(relationship.id, user.id),
     )
 
 
-@router.callback_query(F.data.startswith(MARRY_ACCEPT_PREFIX))
-async def on_marry_accept(callback: CallbackQuery, session: AsyncSession):
-    relationship_id = int(callback.data.removeprefix(MARRY_ACCEPT_PREFIX))
-    relationship = await get_relationship_by_id(session, relationship_id)
+async def _check_marry_responder(callback: CallbackQuery, session: AsyncSession, prefix: str):
+    """Общая проверка: пара существует, нажал именно второй партнёр (не автор предложения)."""
+    parsed = _parse_marry_payload(callback.data, prefix)
+    if parsed is None:
+        await callback.answer("Кнопка устарела. Отправьте /marry заново.", show_alert=True)
+        return None
+    relationship_id, proposer_id = parsed
 
+    relationship = await get_relationship_by_id(session, relationship_id)
     if relationship is None:
         await callback.answer("Эта пара больше не существует.", show_alert=True)
-        return
+        return None
 
     responder = await _get_user(callback, session)
+    if responder.id == proposer_id:
+        await callback.answer("Ты сам(а) сделал(а) предложение — ответить должен партнёр.", show_alert=True)
+        return None
     if responder.id not in (relationship.user1_id, relationship.user2_id):
         await callback.answer("Это предложение не для тебя.", show_alert=True)
+        return None
+    return relationship
+
+
+@router.callback_query(F.data.startswith(MARRY_YES_PREFIX))
+async def on_marry_accept(callback: CallbackQuery, session: AsyncSession):
+    relationship = await _check_marry_responder(callback, session, MARRY_YES_PREFIX)
+    if relationship is None:
         return
 
     if not await can_marry(session, relationship):
@@ -432,17 +467,24 @@ async def on_marry_accept(callback: CallbackQuery, session: AsyncSession):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith(MARRY_REJECT_PREFIX))
+@router.callback_query(F.data.startswith(MARRY_NO_PREFIX))
 async def on_marry_reject(callback: CallbackQuery, session: AsyncSession):
-    relationship_id = int(callback.data.removeprefix(MARRY_REJECT_PREFIX))
-    relationship = await get_relationship_by_id(session, relationship_id)
-
+    relationship = await _check_marry_responder(callback, session, MARRY_NO_PREFIX)
     if relationship is None:
-        await callback.answer("Эта пара больше не существует.", show_alert=True)
         return
 
-    await callback.message.edit_text("😔 Предложение руки и сердца отклонено. Может, в другой раз.")
+    responder = await _get_user(callback, session)
+    await callback.message.edit_text(
+        f"😔 {_mention(responder)} отклонил(а) предложение руки и сердца. Может, в другой раз."
+    )
     await callback.answer()
+
+
+# Кнопки из старых сообщений (до исправления) больше не работают — просим повторить.
+@router.callback_query(F.data.startswith(MARRY_ACCEPT_PREFIX))
+@router.callback_query(F.data.startswith(MARRY_REJECT_PREFIX))
+async def on_marry_legacy(callback: CallbackQuery):
+    await callback.answer("Это старое предложение. Отправьте /marry заново.", show_alert=True)
 
 
 # ---------------------------------------------------------------------------
