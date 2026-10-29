@@ -4,6 +4,7 @@
 Проверяет: не пора ли родить, взросление и настроение детей, напоминания
 по кредитам, и угасание настроения питомцев.
 """
+import html
 import logging
 
 from aiogram import Bot
@@ -163,8 +164,14 @@ async def _process_pets(bot: Bot) -> None:
 
         for event in events:
             text = (
-                f"🐾 {event.pet_name} убежал(а)! За ним/ней совсем не следили...\n\n"
-                f"Ещё можно попробовать вернуть питомца:"
+                f"🐾 {event.owners}, ваш питомец {html.escape(event.pet_name)} убежал(а)! "
+                f"За ним/ней совсем не следили...\n\n"
+                f"Ещё можно попробовать вернуть питомца — кнопками ниже или командами:\n"
+                f"/pet_poster — расклеить объявления (бесплатно, ~12 ч)\n"
+                f"/pet_hire — нанять поисковика (300 🪙, сразу)\n"
+                f"Если питомцев несколько, добавь номер из /pet, например: /pet_hire 2.\n"
+                f"Потерялось сообщение? Команда /find_pet покажет всё заново.\n"
+                f"⏳ Если никто не начнёт поиски за сутки, питомец потеряется навсегда."
             )
             keyboard = InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -194,8 +201,8 @@ async def _process_missing_pets(bot: Bot) -> None:
 
         for event in found_events:
             text = (
-                f"🎉 Ваши объявления помогли! {event.pet_name} нашёлся(-лась) "
-                f"и вернулся(-лась) домой!"
+                f"🎉 {event.owners}, ваши объявления помогли! "
+                f"{html.escape(event.pet_name)} нашёлся(-лась) и вернулся(-лась) домой!"
             )
             try:
                 await bot.send_message(event.chat_id, text)
@@ -205,13 +212,13 @@ async def _process_missing_pets(bot: Bot) -> None:
         for event in lost_events:
             if event.abandoned:
                 text = (
-                    f"💔 Никто так и не начал искать {event.pet_name}... "
+                    f"💔 {event.owners}, никто так и не начал искать {html.escape(event.pet_name)}... "
                     f"К сожалению, питомец потерялся навсегда."
                 )
             else:
                 text = (
-                    f"💔 К сожалению, объявления не помогли — {event.pet_name} "
-                    f"так и не нашёлся(-лась)."
+                    f"💔 {event.owners}, к сожалению, объявления не помогли — "
+                    f"{html.escape(event.pet_name)} так и не нашёлся(-лась)."
                 )
             try:
                 await bot.send_message(event.chat_id, text)

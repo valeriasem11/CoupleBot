@@ -75,6 +75,24 @@ async def get_pending_proposal(
     return result.scalar_one_or_none()
 
 
+async def get_pending_proposals_for(
+    session: AsyncSession, to_user_id: int, chat_id: int
+) -> list[Relationship]:
+    """
+    Все ожидающие ответа предложения отношений, адресованные to_user_id в этом чате.
+    Нужно для команд /accept и /decline без ответа на сообщение: если
+    предложение ровно одно — понятно, о каком речь.
+    """
+    result = await session.execute(
+        select(Relationship).where(
+            Relationship.user2_id == to_user_id,
+            Relationship.status == RelationshipStatus.PENDING,
+            Relationship.chat_id == chat_id,
+        )
+    )
+    return list(result.scalars().all())
+
+
 def get_partner(relationship: Relationship, user_id: int) -> User:
     """Второй участник пары (не user_id)."""
     return relationship.user2 if relationship.user1_id == user_id else relationship.user1
@@ -381,6 +399,37 @@ async def set_offended(session: AsyncSession, relationship: Relationship, offend
     await session.commit()
 
 
+# Сколько живёт предложение руки и сердца, если на него не ответили
+MARRY_PROPOSAL_TTL = timedelta(hours=24)
+
+
+async def start_marry_proposal(
+    session: AsyncSession, relationship: Relationship, proposer_id: int
+) -> None:
+    """Запоминает, что proposer_id сделал предложение руки и сердца (ждём ответа партнёра)."""
+    relationship.marry_proposed_by_id = proposer_id
+    relationship.marry_proposed_at = datetime.now(timezone.utc)
+    await session.commit()
+
+
+async def clear_marry_proposal(session: AsyncSession, relationship: Relationship) -> None:
+    relationship.marry_proposed_by_id = None
+    relationship.marry_proposed_at = None
+    await session.commit()
+
+
+def get_marry_proposer_id(relationship: Relationship) -> int | None:
+    """id того, кто сделал актуальное (не просроченное) предложение руки и сердца, либо None."""
+    if relationship.marry_proposed_by_id is None or relationship.marry_proposed_at is None:
+        return None
+    proposed_at = relationship.marry_proposed_at
+    if proposed_at.tzinfo is None:
+        proposed_at = proposed_at.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - proposed_at > MARRY_PROPOSAL_TTL:
+        return None
+    return relationship.marry_proposed_by_id
+
+
 async def can_marry(session: AsyncSession, relationship: Relationship) -> bool:
     marriage_stage = await _get_marriage_stage(session)
     if marriage_stage is None:
@@ -400,6 +449,8 @@ async def marry(session: AsyncSession, relationship: Relationship) -> None:
     relationship.stage_id = marriage_stage.id
     relationship.status = RelationshipStatus.MARRIED
     relationship.married_at = datetime.now(timezone.utc)
+    relationship.marry_proposed_by_id = None
+    relationship.marry_proposed_at = None
     await session.commit()
 
 

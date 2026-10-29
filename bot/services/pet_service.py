@@ -5,6 +5,7 @@
 того, кто заводит, без стадий взросления и без риска остаться без денег
 у партнёра (списывается только с инициатора покупки).
 """
+import html
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import random
@@ -41,6 +42,21 @@ PET_ACTIONS = {
 
 class PetError(Exception):
     """Ошибка бизнес-логики питомцев — текст готов для показа пользователю."""
+
+
+def owners_mention(relationship: Relationship) -> str:
+    """Хозяева питомца для сообщений бота от себя: «@user1 и @user2» (или имя, если нет username)."""
+    parts = []
+    for u in (relationship.user1, relationship.user2):
+        parts.append(f"@{u.username}" if u.username else html.escape(u.first_name))
+    return " и ".join(parts)
+
+
+SEARCH_HINT = (
+    "Выбрать способ можно и командами: /pet_poster — расклеить объявления (бесплатно, ~12 ч), "
+    f"/pet_hire — нанять поисковика ({PAID_SEARCH_COST} 🪙, сразу). Если питомцев несколько, добавь номер "
+    "из /pet, например: /pet_hire 2."
+)
 
 
 def mood_label(mood: int) -> str:
@@ -104,6 +120,11 @@ async def adopt_pet(
     limit = get_pet_limit(relationship)
 
     if len(existing_pets) >= limit:
+        if any(p.is_missing for p in existing_pets):
+            raise PetError(
+                "Ваш питомец пропал и пока занимает место. Верните его (/find_pet) "
+                "или подождите — если за сутки никто не начнёт поиски, он потеряется навсегда."
+            )
         if relationship.house is None:
             raise PetError(
                 f"У вашей пары уже есть питомец. Без дома можно завести только одного — "
@@ -240,6 +261,7 @@ class PetRunAwayEvent:
     chat_id: int
     pet_id: int
     pet_name: str
+    owners: str
 
 
 async def process_pets_tick(session: AsyncSession) -> list[PetRunAwayEvent]:
@@ -274,7 +296,12 @@ async def process_pets_tick(session: AsyncSession) -> list[PetRunAwayEvent]:
                 pet.missing_since = now
                 if relationship.chat_id is not None:
                     events.append(
-                        PetRunAwayEvent(chat_id=relationship.chat_id, pet_id=pet.id, pet_name=pet.name)
+                        PetRunAwayEvent(
+                            chat_id=relationship.chat_id,
+                            pet_id=pet.id,
+                            pet_name=pet.name,
+                            owners=owners_mention(relationship),
+                        )
                     )
 
     await session.commit()
@@ -285,12 +312,14 @@ async def process_pets_tick(session: AsyncSession) -> list[PetRunAwayEvent]:
 class PetFoundEvent:
     chat_id: int
     pet_name: str
+    owners: str
 
 
 @dataclass
 class PetLostForeverEvent:
     chat_id: int
     pet_name: str
+    owners: str
     abandoned: bool  # True, если никто вообще не выбрал способ поиска
 
 
@@ -330,11 +359,16 @@ async def process_missing_pets_tick(
                 pet.missing_since = None
                 pet.mood = POSTER_SEARCH_RETURN_MOOD
                 if chat_id is not None:
-                    found_events.append(PetFoundEvent(chat_id=chat_id, pet_name=pet.name))
+                    found_events.append(
+                        PetFoundEvent(chat_id=chat_id, pet_name=pet.name, owners=owners_mention(relationship))
+                    )
             else:
                 if chat_id is not None:
                     lost_events.append(
-                        PetLostForeverEvent(chat_id=chat_id, pet_name=pet.name, abandoned=False)
+                        PetLostForeverEvent(
+                            chat_id=chat_id, pet_name=pet.name,
+                            owners=owners_mention(relationship), abandoned=False,
+                        )
                     )
                 await session.delete(pet)
 
@@ -342,7 +376,10 @@ async def process_missing_pets_tick(
             changed = True
             if chat_id is not None:
                 lost_events.append(
-                    PetLostForeverEvent(chat_id=chat_id, pet_name=pet.name, abandoned=True)
+                    PetLostForeverEvent(
+                        chat_id=chat_id, pet_name=pet.name,
+                        owners=owners_mention(relationship), abandoned=True,
+                    )
                 )
             await session.delete(pet)
 
