@@ -1,6 +1,7 @@
 """
 Хендлеры системы отношений: предложение, действия пары, профиль пары, брак.
 """
+import html
 import random
 from datetime import datetime, timezone
 
@@ -29,19 +30,23 @@ from bot.services.relationship_service import (
     RelationshipError,
     accept_proposal,
     can_marry,
+    clear_marry_proposal,
     create_proposal,
     end_relationship,
     get_action_by_code,
     get_active_relationship,
     get_available_actions,
     get_partner,
+    get_marry_proposer_id,
     get_pending_proposal,
+    get_pending_proposals_for,
     get_relationship_by_id,
     get_relationship_cooldown_remaining,
     marry,
     perform_action,
     reject_proposal,
     set_offended,
+    start_marry_proposal,
     format_timedelta,
 )
 
@@ -123,7 +128,92 @@ def _mention(user) -> str:
     """Кликабельное упоминание пользователя для сообщений в чат."""
     if user.username:
         return f"@{user.username}"
-    return user.first_name
+    return html.escape(user.first_name)
+
+
+async def _get_replied_user(message: Message, session: AsyncSession):
+    """Пользователь, на чьё сообщение ответили командой (или None, если это не ответ / бот)."""
+    reply = message.reply_to_message
+    if reply is None or reply.from_user is None or reply.from_user.is_bot:
+        return None
+    tg = reply.from_user
+    return await get_or_create_user(
+        session=session,
+        telegram_id=tg.id,
+        username=tg.username,
+        first_name=tg.first_name,
+        chat_id=message.chat.id,
+    )
+
+
+# Подсказка, которую бот добавляет к сообщениям с кнопками решения
+ANSWER_HINT = "✍️ Можно ответить и без кнопок: /accept — принять, /decline — отклонить."
+
+
+async def _accept_dating(session: AsyncSession, relationship, chat_id: int):
+    """
+    Принимает предложение встречаться (общая логика для кнопки и для /accept).
+    RelationshipError, если предложение уже неактуально.
+    """
+    if relationship.status.value != "pending":
+        raise RelationshipError("Это предложение уже неактуально.")
+
+    for uid in (relationship.user1_id, relationship.user2_id):
+        if await get_active_relationship(session, uid, chat_id) is not None:
+            await reject_proposal(session, relationship)
+            raise RelationshipError(
+                "Это предложение уже неактуально — у одного из вас уже есть пара в этой беседе."
+            )
+
+    compatibility = await accept_proposal(session, relationship, chat_id)
+    await session.refresh(relationship)
+    return compatibility
+
+
+def _dating_started_text(relationship, compatibility) -> str:
+    bonus_line = (
+        f"\n💝 Стартовый бонус: +{compatibility.starting_affection} ❤️"
+        if compatibility.starting_affection > 0
+        else ""
+    )
+    return (
+        f"💞 {_mention(relationship.user1)} и {_mention(relationship.user2)} теперь встречаются!\n\n"
+        f"🧠 Тест на совместимость: {compatibility.compatibility_percent}%\n"
+        f"{compatibility.compatibility_label}{bonus_line}\n\n"
+        f"Стадия: {relationship.stage.name}\n"
+        f"Используйте /actions, чтобы взаимодействовать друг с другом."
+    )
+
+
+async def _do_marry(target_message, session: AsyncSession, relationship) -> str:
+    """Играет свадьбу (общая логика для кнопки и для /accept). Возвращает текст-поздравление."""
+    await marry(session, relationship)
+    await session.refresh(relationship)
+
+    await _send_achievement_notification(
+        target_message, session, (relationship.user1, relationship.user2), "married"
+    )
+    return (
+        f"👰🤵 {_mention(relationship.user1)} и {_mention(relationship.user2)} поженились! Поздравляем!\n\n"
+        f"Стадия: {relationship.stage.name}"
+    )
+
+
+async def _do_breakup(target_message, session: AsyncSession, relationship) -> str:
+    """Разрывает отношения (общая логика для кнопки и для /breakup_confirm)."""
+    result = await end_relationship(session, relationship)
+
+    await _send_achievement_notification(
+        target_message, session, (relationship.user1, relationship.user2), "broken_heart"
+    )
+
+    if result.was_married:
+        text = "💔 Пара развелась."
+        if result.budget_split_each > 0:
+            text += f" Семейный бюджет разделён — по {result.budget_split_each} 🪙 каждому."
+    else:
+        text = "💔 Пара рассталась."
+    return text
 
 
 async def _send_achievement_notification(message_target, session, users, code):
@@ -170,7 +260,7 @@ async def cmd_propose(message: Message, session: AsyncSession):
 
     await message.answer(
         f"💌 {_mention(proposer)} предлагает {_mention(target)} встречаться!\n\n"
-        f"{_mention(target)}, что скажешь?",
+        f"{_mention(target)}, что скажешь?\n\n{ANSWER_HINT}",
         reply_markup=build_proposal_keyboard(relationship.id),
     )
 
@@ -189,26 +279,17 @@ async def on_proposal_accept(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Это предложение адресовано не тебе.", show_alert=True)
         return
 
-    compatibility = await accept_proposal(session, relationship, callback.message.chat.id)
-    await session.refresh(relationship)
+    try:
+        compatibility = await _accept_dating(session, relationship, callback.message.chat.id)
+    except RelationshipError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
 
     await _send_achievement_notification(
         callback.message, session, (relationship.user1, relationship.user2), "first_relationship"
     )
 
-    bonus_line = (
-        f"\n💝 Стартовый бонус: +{compatibility.starting_affection} ❤️"
-        if compatibility.starting_affection > 0
-        else ""
-    )
-
-    await callback.message.edit_text(
-        f"💞 {_mention(relationship.user1)} и {_mention(relationship.user2)} теперь встречаются!\n\n"
-        f"🧠 Тест на совместимость: {compatibility.compatibility_percent}%\n"
-        f"{compatibility.compatibility_label}{bonus_line}\n\n"
-        f"Стадия: {relationship.stage.name}\n"
-        f"Используйте /actions, чтобы взаимодействовать друг с другом."
-    )
+    await callback.message.edit_text(_dating_started_text(relationship, compatibility))
     await callback.answer()
 
 
@@ -224,6 +305,10 @@ async def on_proposal_reject(callback: CallbackQuery, session: AsyncSession):
     responder = await _get_user(callback, session)
     if responder.id != relationship.user2_id:
         await callback.answer("Это предложение адресовано не тебе.", show_alert=True)
+        return
+
+    if relationship.status.value != "pending":
+        await callback.answer("Это предложение уже неактуально.", show_alert=True)
         return
 
     await reject_proposal(session, relationship)
@@ -413,15 +498,25 @@ async def cmd_marry(message: Message, session: AsyncSession):
         return
 
     partner = get_partner(relationship, user.id)
+
+    # Партнёр уже сделал предложение — не затираем его, а просим ответить
+    if get_marry_proposer_id(relationship) == partner.id:
+        await message.answer(
+            f"{_mention(partner)} уже сделал(а) тебе предложение руки и сердца! 💍\n"
+            f"Ответь на него: /accept — согласиться, /decline — отказать."
+        )
+        return
+
+    await start_marry_proposal(session, relationship, user.id)
     await message.answer(
         f"💍 {_mention(user)} делает {_mention(partner)} предложение руки и сердца!\n\n"
-        f"{_mention(partner)}, что скажешь?",
+        f"{_mention(partner)}, что скажешь?\n\n{ANSWER_HINT}",
         reply_markup=_build_marry_keyboard(relationship.id, user.id),
     )
 
 
 async def _check_marry_responder(callback: CallbackQuery, session: AsyncSession, prefix: str):
-    """Общая проверка: пара существует, нажал именно второй партнёр (не автор предложения)."""
+    """Общая проверка: пара существует, предложение актуально, нажал именно второй партнёр."""
     parsed = _parse_marry_payload(callback.data, prefix)
     if parsed is None:
         await callback.answer("Кнопка устарела. Отправьте /marry заново.", show_alert=True)
@@ -440,6 +535,14 @@ async def _check_marry_responder(callback: CallbackQuery, session: AsyncSession,
     if responder.id not in (relationship.user1_id, relationship.user2_id):
         await callback.answer("Это предложение не для тебя.", show_alert=True)
         return None
+
+    # Предложение могли уже принять/отклонить (в том числе командой) или оно просрочилось
+    if (
+        relationship.status.value != "active"
+        or get_marry_proposer_id(relationship) != proposer_id
+    ):
+        await callback.answer("Это предложение уже неактуально.", show_alert=True)
+        return None
     return relationship
 
 
@@ -453,17 +556,8 @@ async def on_marry_accept(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Условия для брака больше не выполняются.", show_alert=True)
         return
 
-    await marry(session, relationship)
-    await session.refresh(relationship)
-
-    await _send_achievement_notification(
-        callback.message, session, (relationship.user1, relationship.user2), "married"
-    )
-
-    await callback.message.edit_text(
-        f"👰🤵 {_mention(relationship.user1)} и {_mention(relationship.user2)} поженились! Поздравляем!\n\n"
-        f"Стадия: {relationship.stage.name}"
-    )
+    text = await _do_marry(callback.message, session, relationship)
+    await callback.message.edit_text(text)
     await callback.answer()
 
 
@@ -474,6 +568,7 @@ async def on_marry_reject(callback: CallbackQuery, session: AsyncSession):
         return
 
     responder = await _get_user(callback, session)
+    await clear_marry_proposal(session, relationship)
     await callback.message.edit_text(
         f"😔 {_mention(responder)} отклонил(а) предложение руки и сердца. Может, в другой раз."
     )
@@ -520,9 +615,25 @@ async def cmd_breakup(message: Message, session: AsyncSession):
             warning = "\n\n⚠️ " + "; ".join(warning_parts) + "."
 
     await message.answer(
-        f"Ты уверена, что хочешь {verb} {_mention(partner)}?{warning}",
+        f"Ты уверен(а), что хочешь {verb} {_mention(partner)}?{warning}\n\n"
+        f"✍️ Можно подтвердить и без кнопки — командой <code>/breakup_confirm</code> "
+        f"(нажми на неё, чтобы скопировать, и отправь). Передумал(а) — просто ничего не нажимай.",
         reply_markup=build_breakup_confirm_keyboard(relationship.id, user.id),
     )
+
+
+@router.message(Command("breakup_confirm"))
+async def cmd_breakup_confirm(message: Message, session: AsyncSession):
+    """Текстовая замена кнопки «Да» в /breakup — для случая, когда кнопки не видно."""
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
+
+    if relationship is None:
+        await message.answer("У тебя пока нет пары — расставаться не с кем.")
+        return
+
+    text = await _do_breakup(message, session, relationship)
+    await message.answer(text)
 
 
 @router.callback_query(F.data.startswith(BREAKUP_CONFIRM_PREFIX))
@@ -541,18 +652,7 @@ async def on_breakup_confirm(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Эти отношения уже неактивны.", show_alert=True)
         return
 
-    result = await end_relationship(session, relationship)
-
-    await _send_achievement_notification(
-        callback.message, session, (relationship.user1, relationship.user2), "broken_heart"
-    )
-
-    if result.was_married:
-        text = "💔 Пара развелась."
-        if result.budget_split_each > 0:
-            text += f" Семейный бюджет разделён — по {result.budget_split_each} 🪙 каждому."
-    else:
-        text = "💔 Пара рассталась."
+    text = await _do_breakup(callback.message, session, relationship)
 
     await callback.message.edit_text(text)
     await callback.answer()
@@ -583,100 +683,105 @@ async def on_breakup_cancel(callback: CallbackQuery, session: AsyncSession):
 
 @router.message(Command("accept"))
 async def cmd_accept(message: Message, session: AsyncSession):
-    if message.reply_to_message is None or message.reply_to_message.from_user is None:
+    """
+    Принять предложение (встречаться или пожениться) командой вместо кнопки.
+    Работает и без ответа на сообщение — если предложение к тебе одно.
+    """
+    responder = await _get_user(message, session)
+    replied = await _get_replied_user(message, session)
+
+    # 1. Предложение руки и сердца от партнёра
+    relationship = await get_active_relationship(session, responder.id, message.chat.id)
+    if relationship is not None and relationship.status.value == "active":
+        partner = get_partner(relationship, responder.id)
+        if get_marry_proposer_id(relationship) == partner.id and (
+            replied is None or replied.id == partner.id
+        ):
+            if not await can_marry(session, relationship):
+                await message.answer("Условия для брака больше не выполняются.")
+                return
+            text = await _do_marry(message, session, relationship)
+            await message.answer(text)
+            return
+
+    # 2. Предложение встречаться
+    if replied is not None:
+        pending = await get_pending_proposal(session, replied.id, responder.id, message.chat.id)
+        pendings = [pending] if pending is not None else []
+    else:
+        pendings = await get_pending_proposals_for(session, responder.id, message.chat.id)
+
+    if len(pendings) > 1:
+        names = ", ".join(_mention(p.user1) for p in pendings)
         await message.answer(
-            "Чтобы принять предложение, ответь этой командой на сообщение "
-            "того, кто его сделал."
+            f"Тебе предложили встречаться сразу несколько человек ({names}). "
+            f"Ответь командой /accept на сообщение того, кого выбираешь."
         )
         return
 
-    target_tg_user = message.reply_to_message.from_user
-    responder = await _get_user(message, session)
-    proposer = await get_or_create_user(
-        session=session,
-        telegram_id=target_tg_user.id,
-        username=target_tg_user.username,
-        first_name=target_tg_user.first_name,
-        chat_id=message.chat.id,
-    )
-
-    # 1. Есть ли ожидающее предложение встречаться именно от этого человека?
-    pending = await get_pending_proposal(session, proposer.id, responder.id, message.chat.id)
-    if pending is not None:
-        compatibility = await accept_proposal(session, pending, message.chat.id)
-        await session.refresh(pending)
+    if len(pendings) == 1:
+        pending = pendings[0]
+        try:
+            compatibility = await _accept_dating(session, pending, message.chat.id)
+        except RelationshipError as e:
+            await message.answer(str(e))
+            return
 
         await _send_achievement_notification(
             message, session, (pending.user1, pending.user2), "first_relationship"
         )
-
-        bonus_line = (
-            f"\n💝 Стартовый бонус: +{compatibility.starting_affection} ❤️"
-            if compatibility.starting_affection > 0
-            else ""
-        )
-        await message.answer(
-            f"💞 {_mention(pending.user1)} и {_mention(pending.user2)} теперь встречаются!\n\n"
-            f"🧠 Тест на совместимость: {compatibility.compatibility_percent}%\n"
-            f"{compatibility.compatibility_label}{bonus_line}\n\n"
-            f"Стадия: {pending.stage.name}\n"
-            f"Используйте /actions, чтобы взаимодействовать друг с другом."
-        )
-        return
-
-    # 2. Нет предложения встречаться — может, это про предложение руки и сердца?
-    relationship = await get_active_relationship(session, responder.id, message.chat.id)
-    if (
-        relationship is not None
-        and relationship.status.value == "active"
-        and get_partner(relationship, responder.id).telegram_id == target_tg_user.id
-        and await can_marry(session, relationship)
-    ):
-        await marry(session, relationship)
-        await session.refresh(relationship)
-
-        await _send_achievement_notification(
-            message, session, (relationship.user1, relationship.user2), "married"
-        )
-        await message.answer(
-            f"👰🤵 {_mention(relationship.user1)} и {_mention(relationship.user2)} поженились! Поздравляем!\n\n"
-            f"Стадия: {relationship.stage.name}"
-        )
+        await message.answer(_dating_started_text(pending, compatibility))
         return
 
     await message.answer(
-        "Сейчас нечего принимать — не вижу ни одного актуального предложения от этого человека."
+        "Сейчас нечего принимать — не вижу ни одного актуального предложения для тебя."
     )
 
 
 @router.message(Command("decline"))
 async def cmd_decline(message: Message, session: AsyncSession):
-    if message.reply_to_message is None or message.reply_to_message.from_user is None:
+    """Отклонить предложение (встречаться или пожениться) командой вместо кнопки."""
+    responder = await _get_user(message, session)
+    replied = await _get_replied_user(message, session)
+
+    # 1. Предложение руки и сердца от партнёра
+    relationship = await get_active_relationship(session, responder.id, message.chat.id)
+    if relationship is not None and relationship.status.value == "active":
+        partner = get_partner(relationship, responder.id)
+        if get_marry_proposer_id(relationship) == partner.id and (
+            replied is None or replied.id == partner.id
+        ):
+            await clear_marry_proposal(session, relationship)
+            await message.answer(
+                f"😔 {_mention(responder)} отклонил(а) предложение руки и сердца "
+                f"от {_mention(partner)}. Может, в другой раз."
+            )
+            return
+
+    # 2. Предложение встречаться
+    if replied is not None:
+        pending = await get_pending_proposal(session, replied.id, responder.id, message.chat.id)
+        pendings = [pending] if pending is not None else []
+    else:
+        pendings = await get_pending_proposals_for(session, responder.id, message.chat.id)
+
+    if len(pendings) > 1:
+        names = ", ".join(_mention(p.user1) for p in pendings)
         await message.answer(
-            "Чтобы отклонить предложение, ответь этой командой на сообщение "
-            "того, кто его сделал."
+            f"Тебе предложили встречаться сразу несколько человек ({names}). "
+            f"Ответь командой /decline на сообщение того, кому отказываешь."
         )
         return
 
-    target_tg_user = message.reply_to_message.from_user
-    responder = await _get_user(message, session)
-    proposer = await get_or_create_user(
-        session=session,
-        telegram_id=target_tg_user.id,
-        username=target_tg_user.username,
-        first_name=target_tg_user.first_name,
-        chat_id=message.chat.id,
-    )
-
-    pending = await get_pending_proposal(session, proposer.id, responder.id, message.chat.id)
-    if pending is not None:
+    if len(pendings) == 1:
+        pending = pendings[0]
         await reject_proposal(session, pending)
         await message.answer(
             f"💔 {_mention(pending.user2)} отклонил(а) предложение {_mention(pending.user1)}."
         )
         return
 
-    await message.answer("Нечего отклонять — нет ожидающего предложения от этого человека.")
+    await message.answer("Нечего отклонять — не вижу ни одного актуального предложения для тебя.")
 
 
 # ---------------------------------------------------------------------------

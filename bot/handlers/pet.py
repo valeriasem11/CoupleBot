@@ -5,6 +5,9 @@
 Лимит питомцев зависит от дома (см. pet_service.get_pet_limit) — без дома
 всегда можно завести только одного, с домом — по его вместимости.
 """
+import html
+from datetime import datetime, timezone
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -14,8 +17,12 @@ from bot.database.crud import get_or_create_user
 from bot.services.achievement_service import award_couple, format_unlock_text
 from bot.services.pet_service import (
     PET_ACTIONS,
+    MISSING_ABANDON_TIMEOUT,
+    PAID_SEARCH_COST,
     PET_SEARCH_PAID_PREFIX,
     PET_SEARCH_POSTER_PREFIX,
+    POSTER_SEARCH_WAIT,
+    SEARCH_HINT,
     PetError,
     adopt_pet,
     choose_poster_search,
@@ -115,7 +122,12 @@ async def cmd_petshop(message: Message, session: AsyncSession):
     limit = get_pet_limit(relationship)
 
     if len(existing_pets) >= limit:
-        if relationship.house is None:
+        if any(p.is_missing for p in existing_pets):
+            await message.answer(
+                "Ваш питомец пропал и пока занимает место. Верните его (/find_pet) "
+                "или подождите — если за сутки никто не начнёт поиски, он потеряется навсегда."
+            )
+        elif relationship.house is None:
             await message.answer(
                 f"У вашей пары уже есть питомец. Без дома можно завести только одного — "
                 f"купите дом в /shop, чтобы заводить больше."
@@ -245,7 +257,10 @@ async def cmd_pet(message: Message, session: AsyncSession):
     if len(pets) == 1:
         pet = pets[0]
         status_line = "🔍 В розыске..." if pet.is_missing else f"😊 Настроение: {mood_label(pet.mood)} ({pet.mood}%)"
-        await message.answer(f"{pet.species.name.split(' ', 1)[0]} {pet.name}\n{status_line}")
+        text = f"{pet.species.name.split(' ', 1)[0]} {pet.name}\n{status_line}"
+        if pet.is_missing:
+            text += "\n\nВернуть питомца: /find_pet"
+        await message.answer(text)
         return
 
     lines = [f"🐾 Питомцы пары ({len(pets)}):", ""]
@@ -253,6 +268,10 @@ async def cmd_pet(message: Message, session: AsyncSession):
         emoji = pet.species.name.split(" ", 1)[0]
         status = "🔍 в розыске" if pet.is_missing else f"{mood_label(pet.mood)} ({pet.mood}%)"
         lines.append(f"{i}. {emoji} {pet.name} — {status}")
+
+    if any(p.is_missing for p in pets):
+        lines.append("")
+        lines.append("Вернуть пропавшего питомца: /find_pet")
 
     await message.answer("\n".join(lines))
 
@@ -293,7 +312,7 @@ async def cmd_pet_actions(message: Message, session: AsyncSession):
 
     if not available_pets:
         if pets:
-            await message.answer("Ваш питомец сейчас пропал — сначала попробуйте его вернуть.")
+            await message.answer("Ваш питомец сейчас пропал — сначала попробуйте его вернуть: /find_pet")
         else:
             await message.answer("У вашей пары пока нет питомца. Завести: /petshop")
         return
@@ -365,8 +384,162 @@ async def on_pet_action(callback: CallbackQuery, session: AsyncSession):
 
 
 # ---------------------------------------------------------------------------
-# Возврат сбежавшего питомца
+# Возврат сбежавшего питомца — и кнопками, и командами
 # ---------------------------------------------------------------------------
+
+
+async def _is_owner(session: AsyncSession, user, pet) -> bool:
+    """Искать пропавшего питомца вправе только хозяева (пара, которой он принадлежит)."""
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
+    return relationship is not None and pet.relationship_id == relationship.id
+
+
+async def _do_poster_search(session: AsyncSession, user, pet) -> str:
+    """Логика «расклеить объявления» (общая для кнопки и команды). PetError — если нельзя."""
+    if not await _is_owner(session, user, pet):
+        raise PetError("Это не ваш питомец.")
+    await choose_poster_search(session, pet)
+    return (
+        f"📋 Вы расклеили объявления про {html.escape(pet.name)} по району. "
+        f"Остаётся только ждать вестей (примерно {format_timedelta(POSTER_SEARCH_WAIT)})..."
+    )
+
+
+async def _do_paid_search(session: AsyncSession, user, pet) -> str:
+    """Логика «нанять поисковика» (общая для кнопки и команды). PetError — если нельзя."""
+    if not await _is_owner(session, user, pet):
+        raise PetError("Это не ваш питомец.")
+    new_mood = await pay_for_search(session, pet, user)
+    return (
+        f"🎉 Поисковик нашёл {html.escape(pet.name)}! Питомец сразу вернулся домой "
+        f"(настроение: {new_mood}%)."
+    )
+
+
+def _build_search_keyboard(pets_missing) -> InlineKeyboardMarkup:
+    buttons = []
+    many = len(pets_missing) > 1
+    for pet in pets_missing:
+        suffix = f" ({pet.name})" if many else ""
+        if pet.search_method is None:
+            buttons.append(
+                [
+                    InlineKeyboardButton(
+                        text=f"📋 Расклеить объявления{suffix}",
+                        callback_data=f"{PET_SEARCH_POSTER_PREFIX}{pet.id}",
+                    )
+                ]
+            )
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    text=f"💰 Нанять поисковика, {PAID_SEARCH_COST} 🪙{suffix}",
+                    callback_data=f"{PET_SEARCH_PAID_PREFIX}{pet.id}",
+                )
+            ]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def _missing_status(pet) -> str:
+    if pet.search_method == "poster":
+        return "объявления расклеены, ждём вестей"
+    since = pet.missing_since
+    if since is not None:
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        left = since + MISSING_ABANDON_TIMEOUT - datetime.now(timezone.utc)
+        if left.total_seconds() > 0:
+            return f"поиски не начаты — если ничего не делать, потеряется через {format_timedelta(left)}"
+    return "поиски не начаты"
+
+
+@router.message(Command("find_pet"))
+async def cmd_find_pet(message: Message, session: AsyncSession):
+    """Показывает пропавших питомцев пары и способы их вернуть (если сообщение бота потерялось)."""
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
+    if relationship is None:
+        await message.answer("У тебя пока нет пары.")
+        return
+
+    pets = await get_pets(session, relationship.id)
+    missing = [(i, p) for i, p in enumerate(pets, start=1) if p.is_missing]
+    if not missing:
+        await message.answer("Все ваши питомцы дома — искать никого не нужно 🐾")
+        return
+
+    lines = ["🔍 Пропавшие питомцы:", ""]
+    for i, pet in missing:
+        emoji = pet.species.name.split(" ", 1)[0]
+        lines.append(f"{i}. {emoji} {html.escape(pet.name)} — {_missing_status(pet)}")
+    lines.append("")
+    lines.append(SEARCH_HINT)
+
+    await message.answer(
+        "\n".join(lines),
+        reply_markup=_build_search_keyboard([p for _, p in missing]),
+    )
+
+
+async def _pick_missing_pet(message: Message, command: CommandObject, session: AsyncSession):
+    """Находит пропавшего питомца для команд /pet_poster и /pet_hire. Возвращает (user, pet) или None."""
+    user = await _get_user(message, session)
+    relationship = await get_active_relationship(session, user.id, user.chat_id)
+    if relationship is None:
+        await message.answer("У тебя пока нет пары.")
+        return None
+
+    pets = await get_pets(session, relationship.id)
+    missing = [(i, p) for i, p in enumerate(pets, start=1) if p.is_missing]
+    if not missing:
+        await message.answer("Все ваши питомцы дома — искать никого не нужно 🐾")
+        return None
+
+    arg = (command.args or "").strip()
+    if arg:
+        if not arg.isdigit() or int(arg) not in [i for i, _ in missing]:
+            options = ", ".join(f"{i} — {html.escape(p.name)}" for i, p in missing)
+            await message.answer(f"Не нашла такого пропавшего питомца. Доступно: {options}.")
+            return None
+        return user, dict(missing)[int(arg)]
+
+    if len(missing) > 1:
+        options = "\n".join(f"{i}. {html.escape(p.name)}" for i, p in missing)
+        await message.answer(
+            f"Пропало несколько питомцев — укажи номер, например: /pet_hire {missing[0][0]}\n\n{options}"
+        )
+        return None
+
+    return user, missing[0][1]
+
+
+@router.message(Command("pet_poster"))
+async def cmd_pet_poster(message: Message, command: CommandObject, session: AsyncSession):
+    picked = await _pick_missing_pet(message, command, session)
+    if picked is None:
+        return
+    user, pet = picked
+    try:
+        text = await _do_poster_search(session, user, pet)
+    except PetError as e:
+        await message.answer(str(e))
+        return
+    await message.answer(text)
+
+
+@router.message(Command("pet_hire"))
+async def cmd_pet_hire(message: Message, command: CommandObject, session: AsyncSession):
+    picked = await _pick_missing_pet(message, command, session)
+    if picked is None:
+        return
+    user, pet = picked
+    try:
+        text = await _do_paid_search(session, user, pet)
+    except PetError as e:
+        await message.answer(str(e))
+        return
+    await message.answer(text)
 
 
 @router.callback_query(F.data.startswith(PET_SEARCH_POSTER_PREFIX))
@@ -377,16 +550,14 @@ async def on_pet_search_poster(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("Этот питомец уже недоступен.", show_alert=True)
         return
 
+    user = await _get_user(callback, session)
     try:
-        await choose_poster_search(session, pet)
+        text = await _do_poster_search(session, user, pet)
     except PetError as e:
         await callback.answer(str(e), show_alert=True)
         return
 
-    await callback.message.edit_text(
-        f"{callback.message.text}\n\n"
-        f"📋 Вы расклеили объявления по району. Остаётся только ждать вестей..."
-    )
+    await callback.message.edit_text(f"{callback.message.html_text}\n\n{text}")
     await callback.answer()
 
 
@@ -399,15 +570,11 @@ async def on_pet_search_paid(callback: CallbackQuery, session: AsyncSession):
         return
 
     user = await _get_user(callback, session)
-
     try:
-        new_mood = await pay_for_search(session, pet, user)
+        text = await _do_paid_search(session, user, pet)
     except PetError as e:
         await callback.answer(str(e), show_alert=True)
         return
 
-    await callback.message.edit_text(
-        f"🎉 Поисковик нашёл {pet.name}! Питомец сразу вернулся домой "
-        f"(настроение: {new_mood}%)."
-    )
+    await callback.message.edit_text(text)
     await callback.answer()

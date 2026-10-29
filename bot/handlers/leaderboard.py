@@ -1,6 +1,8 @@
 """
 Хендлер рейтинга пар: /top, переключение категорий (близость/богатство/дети).
 """
+import html
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -28,9 +30,15 @@ UNITS = {
 
 
 def _mention(user) -> str:
+    """Упоминание с пингом (@username) — только для одноразового уведомления о достижении."""
     if user.username:
         return f"@{user.username}"
-    return user.first_name
+    return html.escape(user.first_name)
+
+
+def _plain_name(user) -> str:
+    """Имя БЕЗ тега — в самом рейтинге никого не пингуем."""
+    return html.escape(user.first_name)
 
 
 async def _render_leaderboard(
@@ -48,7 +56,7 @@ async def _render_leaderboard(
     for i, entry in enumerate(entries):
         rel = entry.relationship
         place = MEDALS[i] if i < len(MEDALS) else f"{i + 1}."
-        names = f"{_mention(rel.user1)} и {_mention(rel.user2)}"
+        names = f"{_plain_name(rel.user1)} и {_plain_name(rel.user2)}"
         value_str = f"{entry.value} {unit}".strip()
         lines.append(f"{place} {names} — {value_str}")
 
