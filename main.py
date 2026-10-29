@@ -57,6 +57,8 @@ BOT_COMMANDS = [
     BotCommand(command="pay", description="Перевести монеты другому игроку"),
     BotCommand(command="payall", description="Перевести весь баланс другому игроку"),
     BotCommand(command="propose", description="Предложить отношения (ответом на сообщение)"),
+    BotCommand(command="accept", description="Принять предложение (встречаться / пожениться)"),
+    BotCommand(command="decline", description="Отклонить предложение"),
     BotCommand(command="actions", description="Взаимодействовать с партнёром"),
     BotCommand(command="couple", description="Профиль пары"),
     BotCommand(command="marry", description="Сделать предложение руки и сердца"),
@@ -83,6 +85,9 @@ BOT_COMMANDS = [
     BotCommand(command="pet", description="Карточка питомца"),
     BotCommand(command="name_pet", description="Переименовать питомца"),
     BotCommand(command="pet_actions", description="Взаимодействовать с питомцем"),
+    BotCommand(command="find_pet", description="Вернуть пропавшего питомца"),
+    BotCommand(command="pet_poster", description="Расклеить объявления о пропавшем питомце"),
+    BotCommand(command="pet_hire", description="Нанять поисковика за 300 🪙"),
 ]
 
 
