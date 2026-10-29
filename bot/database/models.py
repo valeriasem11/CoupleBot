@@ -245,6 +245,13 @@ class Relationship(Base):
     last_travel_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Ожидающее ответа предложение руки и сердца: кто сделал и когда. Нужно, чтобы
+    # принять/отклонить его можно было и командой (/accept, /decline), а не только
+    # кнопкой, и чтобы партнёр не мог "принять" предложение, которого не было.
+    marry_proposed_by_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    marry_proposed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     user1: Mapped["User"] = relationship(foreign_keys=[user1_id], lazy="joined")
     user2: Mapped["User"] = relationship(foreign_keys=[user2_id], lazy="joined")
